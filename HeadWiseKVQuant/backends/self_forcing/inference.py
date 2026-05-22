@@ -46,6 +46,12 @@ parser.add_argument("--cache_num_v_centroids", type=int, default=256, help="Numb
 parser.add_argument("--kmeans_max_iters", type=int, default=100, help="Maximum iterations for K-Means clustering")
 parser.add_argument("--quant_block_size", type=int, default=16, help="Block size for quantization")
 parser.add_argument("--num_prq_stages", type=int, default=1, help="Number of PRQ stages for nstages-kmeans quantization")
+parser.add_argument("--hrq_group_size", type=int, default=64, help="Group size for HRQ quantization")
+parser.add_argument("--hrq_anchor_bits", type=int, default=4, help="Anchor bit width for HRQ")
+parser.add_argument("--hrq_predictor_stride", type=int, default=1560, help="Predictor stride for HRQ")
+parser.add_argument("--hrq_predictor_mode", type=str, default="identity", help="Predictor mode for HRQ")
+parser.add_argument("--hrq_scale_precision", type=str, default="bf16", help="Scale precision for HRQ")
+parser.add_argument("--hrq_residual_quant_mode", type=str, default="asym_zero_point", help="Residual quantization mode for HRQ")
 parser.add_argument("--headwise_mode", type=str, default="none", help="Head-wise policy mode: none, random, or topk")
 parser.add_argument("--headwise_seed", type=int, default=0, help="Random seed used for head-wise grouping")
 parser.add_argument("--num_high_precision_heads", type=int, default=0, help="How many heads use the high-precision quant type")
@@ -91,6 +97,12 @@ config.quant_config = {
     "kmeans_max_iters": args.kmeans_max_iters,
     "quant_block_size": args.quant_block_size,
     "num_prq_stages": args.num_prq_stages,
+    "hrq_group_size": args.hrq_group_size,
+    "hrq_anchor_bits": args.hrq_anchor_bits,
+    "hrq_predictor_stride": args.hrq_predictor_stride,
+    "hrq_predictor_mode": args.hrq_predictor_mode,
+    "hrq_scale_precision": args.hrq_scale_precision,
+    "hrq_residual_quant_mode": args.hrq_residual_quant_mode,
     "headwise_mode": args.headwise_mode,
     "headwise_seed": args.headwise_seed,
     "num_high_precision_heads": args.num_high_precision_heads,

@@ -17,6 +17,7 @@ from .functions import (
     triton_prq_quantize_tensor,
 )
 from .packed_naive import packed_naive_quantize_tensor
+from .real.hrq import hrq_quantize_tensor
 
 
 ########################################################
@@ -32,6 +33,7 @@ class QuantizeFunctions(Enum):
     TRITON_PRQ = "triton_prq"
     TRITON_PRQ_CLIP = "triton_prq_clip"
     PACKED_NAIVE = "packed_naive"
+    HRQ = "hrq"
 
 
 def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
@@ -114,8 +116,8 @@ def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
                 raise ValueError(f"Cannot identify num_bits from {quant_config.quant_type}")
             num_bits = int(m.group(1))
             return num_bits
-    elif quant_type in ["packed-naive-int2", "packed-naive-int4", "packed-naive-int8"]:
-        """Packed naive is handled in compress_kv_cache."""
+    elif quant_type in ["packed-naive-int2", "packed-naive-int4", "packed-naive-int8"] or quant_type.startswith("hrq"):
+        """Packed/real quantization is handled in compress_kv_cache."""
         def quantize_fn(x):
             m = re.search(r'int(\d+)', quant_config.quant_type)
             if m is None:
@@ -177,6 +179,8 @@ def get_quantize_type(quant_type: str):
         "packed-naive-int8",
     ]:
         quantize_type = QuantizeFunctions.PACKED_NAIVE
+    elif quant_type.startswith("hrq"):
+        quantize_type = QuantizeFunctions.HRQ
     else:
         quantize_type = QuantizeFunctions.NAIVE
 
@@ -290,6 +294,28 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
             v,
             num_bits=num_bits,
             block_size=quant_config.quant_block_size,
+        )
+    elif quantize_type == QuantizeFunctions.HRQ:
+        num_bits = quantize_fn(k)
+        k_quant = hrq_quantize_tensor(
+            k,
+            num_bits=num_bits,
+            block_size=getattr(quant_config, "hrq_group_size", quant_config.quant_block_size),
+            anchor_bits=getattr(quant_config, "hrq_anchor_bits", 4),
+            predictor_stride=getattr(quant_config, "hrq_predictor_stride", 1560),
+            predictor_mode=getattr(quant_config, "hrq_predictor_mode", "identity"),
+            scale_precision=getattr(quant_config, "hrq_scale_precision", torch.bfloat16),
+            residual_quant_mode=getattr(quant_config, "hrq_residual_quant_mode", "asym_zero_point"),
+        )
+        v_quant = hrq_quantize_tensor(
+            v,
+            num_bits=num_bits,
+            block_size=getattr(quant_config, "hrq_group_size", quant_config.quant_block_size),
+            anchor_bits=getattr(quant_config, "hrq_anchor_bits", 4),
+            predictor_stride=getattr(quant_config, "hrq_predictor_stride", 1560),
+            predictor_mode=getattr(quant_config, "hrq_predictor_mode", "identity"),
+            scale_precision=getattr(quant_config, "hrq_scale_precision", torch.bfloat16),
+            residual_quant_mode=getattr(quant_config, "hrq_residual_quant_mode", "asym_zero_point"),
         )
     else:
         raise ValueError(f"Unsupported quant type: {quant_type}")

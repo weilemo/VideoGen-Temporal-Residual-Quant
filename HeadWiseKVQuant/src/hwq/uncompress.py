@@ -11,6 +11,7 @@ from .compress import get_quantize_type, QuantizeFunctions
 from .sim.quant.quantize_config import QuantizeConfig
 from .functions import triton_prq_dequantize_tensor
 from .packed_naive import packed_naive_dequantize_tensor
+from .real.hrq import hrq_dequantize_tensor
 
 
 ########################################################
@@ -51,6 +52,11 @@ def _dequantize_single_cache(
         )
     if quantize_type == QuantizeFunctions.PACKED_NAIVE:
         return packed_naive_dequantize_tensor(
+            packed_state,
+            output_dtype=output_dtype,
+        )
+    if quantize_type == QuantizeFunctions.HRQ:
+        return hrq_dequantize_tensor(
             packed_state,
             output_dtype=output_dtype,
         )
