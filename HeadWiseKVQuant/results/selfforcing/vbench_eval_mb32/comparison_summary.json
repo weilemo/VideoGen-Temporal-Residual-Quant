@@ -1,0 +1,299 @@
+{
+  "bf16_mb32": {
+    "name": "BF16 Baseline",
+    "raw_scores": {
+      "aesthetic quality": 0.6003633213188985,
+      "background consistency": 0.9674183228908724,
+      "clip score": 0.31043751343436865,
+      "dynamic degree": 0.3858695652173913,
+      "imaging quality": 0.7051204460454376,
+      "motion smoothness": 0.9879875644144205,
+      "overall consistency": 0.22298438838966514,
+      "subject consistency": 0.9819209486400247
+    },
+    "norm_weighted": {
+      "subject consistency": 0.9788251916608394,
+      "background consistency": 0.9558812767648915,
+      "motion smoothness": 0.9673672878710821,
+      "dynamic degree": 0.19293478260869565,
+      "aesthetic quality": 0.6003633213188985,
+      "imaging quality": 0.7051204460454376,
+      "overall consistency": 0.6125944735979811,
+      "clip score": 0.8727509514601312
+    },
+    "temporal_quality": 0.8842881539730024,
+    "frame_wise_quality": 0.652741883682168,
+    "text_alignment": 0.7426727125290562,
+    "final_score": 0.7633465575678795
+  },
+  "topk_hwq_int8_int4_mb32": {
+    "name": "TK4 int8+int4",
+    "raw_scores": {
+      "aesthetic quality": 0.5983300418795451,
+      "background consistency": 0.9662371791930565,
+      "clip score": 0.309923793958581,
+      "dynamic degree": 0.37907608695652173,
+      "imaging quality": 0.7026682920308541,
+      "motion smoothness": 0.987410786540577,
+      "overall consistency": 0.22283257856843589,
+      "subject consistency": 0.9818144383805
+    },
+    "norm_weighted": {
+      "subject consistency": 0.9787004431722885,
+      "background consistency": 0.9542818946419183,
+      "motion smoothness": 0.9653886330723052,
+      "dynamic degree": 0.18953804347826086,
+      "aesthetic quality": 0.5983300418795451,
+      "imaging quality": 0.7026682920308541,
+      "overall consistency": 0.6121774136495491,
+      "clip score": 0.8713067021607562
+    },
+    "temporal_quality": 0.8822597183899351,
+    "frame_wise_quality": 0.6504991669551996,
+    "text_alignment": 0.7417420579051527,
+    "final_score": 0.7614519657190845
+  },
+  "rhwq_random_int8_int4_mb32": {
+    "name": "Rand4 int8+int4",
+    "raw_scores": {
+      "aesthetic quality": 0.5971064511686563,
+      "background consistency": 0.9659426824240683,
+      "clip score": 0.3100771074709685,
+      "dynamic degree": 0.37092391304347827,
+      "imaging quality": 0.6999884188644911,
+      "motion smoothness": 0.9873843813986525,
+      "overall consistency": 0.2222949623170754,
+      "subject consistency": 0.9813346792584569
+    },
+    "norm_weighted": {
+      "subject consistency": 0.9781385327459087,
+      "background consistency": 0.9538831177035456,
+      "motion smoothness": 0.965298049395034,
+      "dynamic degree": 0.18546195652173914,
+      "aesthetic quality": 0.5971064511686563,
+      "imaging quality": 0.6999884188644911,
+      "overall consistency": 0.6107004459260313,
+      "clip score": 0.8717377213128156
+    },
+    "temporal_quality": 0.8807947589617794,
+    "frame_wise_quality": 0.6485474350165737,
+    "text_alignment": 0.7412190836194235,
+    "final_score": 0.759980694315226
+  },
+  "topk_k2_int8_int4_mb32": {
+    "name": "TK2 int8+int4",
+    "raw_scores": {
+      "aesthetic quality": 0.5990082032006719,
+      "background consistency": 0.9663826620093906,
+      "clip score": 0.31000558189723804,
+      "dynamic degree": 0.3763586956521739,
+      "imaging quality": 0.7005027101140306,
+      "motion smoothness": 0.9872539248554162,
+      "overall consistency": 0.2227473952503794,
+      "subject consistency": 0.9816437925892613
+    },
+    "norm_weighted": {
+      "subject consistency": 0.9785005769375278,
+      "background consistency": 0.9544788923620727,
+      "motion smoothness": 0.9648505140837603,
+      "dynamic degree": 0.18817934782608695,
+      "aesthetic quality": 0.5990082032006719,
+      "imaging quality": 0.7005027101140306,
+      "overall consistency": 0.6119433935449984,
+      "clip score": 0.8715366373270678
+    },
+    "temporal_quality": 0.8817169517741279,
+    "frame_wise_quality": 0.6497554566573513,
+    "text_alignment": 0.7417400154360331,
+    "final_score": 0.7609369664597982
+  },
+  "topk_k6_int8_int4_mb32": {
+    "name": "TK6 int8+int4",
+    "raw_scores": {
+      "aesthetic quality": 0.598010922498677,
+      "background consistency": 0.9669661234338026,
+      "clip score": 0.3097683865091075,
+      "dynamic degree": 0.37092391304347827,
+      "imaging quality": 0.7038886052491549,
+      "motion smoothness": 0.9876118644314297,
+      "overall consistency": 0.2217482599105848,
+      "subject consistency": 0.981315274422448
+    },
+    "norm_weighted": {
+      "subject consistency": 0.9781158051328742,
+      "background consistency": 0.9552689552251898,
+      "motion smoothness": 0.966078437157563,
+      "dynamic degree": 0.18546195652173914,
+      "aesthetic quality": 0.598010922498677,
+      "imaging quality": 0.7038886052491549,
+      "overall consistency": 0.6091985162378704,
+      "clip score": 0.8708697962021577
+    },
+    "temporal_quality": 0.8814071868678189,
+    "frame_wise_quality": 0.6509497638739159,
+    "text_alignment": 0.740034156220014,
+    "final_score": 0.7609496115406966
+  },
+  "topk_k8_int8_int4_mb32": {
+    "name": "TK8 int8+int4",
+    "raw_scores": {
+      "aesthetic quality": 0.5994949131070272,
+      "background consistency": 0.9669583442334878,
+      "clip score": 0.30987919931826385,
+      "dynamic degree": 0.3736413043478261,
+      "imaging quality": 0.7036531612552379,
+      "motion smoothness": 0.9876923716726133,
+      "overall consistency": 0.2220953070740823,
+      "subject consistency": 0.9817390051575007
+    },
+    "norm_weighted": {
+      "subject consistency": 0.978612093180488,
+      "background consistency": 0.9552584214400649,
+      "motion smoothness": 0.9663546198031328,
+      "dynamic degree": 0.18682065217391305,
+      "aesthetic quality": 0.5994949131070272,
+      "imaging quality": 0.7036531612552379,
+      "overall consistency": 0.6101519425112151,
+      "clip score": 0.8711813306670335
+    },
+    "temporal_quality": 0.8820130818850282,
+    "frame_wise_quality": 0.6515740371811325,
+    "text_alignment": 0.7406666365891243,
+    "final_score": 0.7615681749442892
+  },
+  "rhwq_random_int4_int2_mb32": {
+    "name": "Rand4 int4+int2",
+    "raw_scores": {
+      "aesthetic quality": 0.5600846970615827,
+      "background consistency": 0.9606850344536187,
+      "clip score": 0.3078203408614449,
+      "dynamic degree": 0.18070652173913043,
+      "imaging quality": 0.6460509887645426,
+      "motion smoothness": 0.9846914889125122,
+      "overall consistency": 0.2182794745363619,
+      "subject consistency": 0.977283323089609
+    },
+    "norm_weighted": {
+      "subject consistency": 0.9733934447055621,
+      "background consistency": 0.9467637568769381,
+      "motion smoothness": 0.9560599962693386,
+      "dynamic degree": 0.09035326086956522,
+      "aesthetic quality": 0.5600846970615827,
+      "imaging quality": 0.6460509887645426,
+      "overall consistency": 0.5996688860889063,
+      "clip score": 0.8653931427085884
+    },
+    "temporal_quality": 0.8475915596346868,
+    "frame_wise_quality": 0.6030678429130627,
+    "text_alignment": 0.7325310143987473,
+    "final_score": 0.7267699638988493
+  },
+  "topk_k4_int4_int2_mb32": {
+    "name": "TK4 int4+int2",
+    "raw_scores": {
+      "aesthetic quality": 0.5620520787880473,
+      "background consistency": 0.9600587178747912,
+      "clip score": 0.3091673229051673,
+      "dynamic degree": 0.16847826086956522,
+      "imaging quality": 0.6585841064033624,
+      "motion smoothness": 0.9848641110685804,
+      "overall consistency": 0.2217563886863544,
+      "subject consistency": 0.9770845243260581
+    },
+    "norm_weighted": {
+      "subject consistency": 0.9731606047388828,
+      "background consistency": 0.9459156640146124,
+      "motion smoothness": 0.9566521820534489,
+      "dynamic degree": 0.08423913043478261,
+      "aesthetic quality": 0.5620520787880473,
+      "imaging quality": 0.6585841064033624,
+      "overall consistency": 0.6092208480394351,
+      "clip score": 0.8691799912993177
+    },
+    "temporal_quality": 0.8457050232119219,
+    "frame_wise_quality": 0.6103180925957048,
+    "text_alignment": 0.7392004196693764,
+    "final_score": 0.730249330256926
+  },
+  "topk_k2_int4_int2_mb32": {
+    "name": "TK2 int4+int2",
+    "raw_scores": {
+      "aesthetic quality": 0.5555380236195482,
+      "background consistency": 0.9594127125358843,
+      "clip score": 0.30811075542284094,
+      "dynamic degree": 0.16983695652173914,
+      "imaging quality": 0.6372435232818775,
+      "motion smoothness": 0.9846686596957857,
+      "overall consistency": 0.21969744845536415,
+      "subject consistency": 0.9764461040269548
+    },
+    "norm_weighted": {
+      "subject consistency": 0.9724128648711112,
+      "background consistency": 0.9450409106782457,
+      "motion smoothness": 0.9559816799169317,
+      "dynamic degree": 0.08491847826086957,
+      "aesthetic quality": 0.5555380236195482,
+      "imaging quality": 0.6372435232818775,
+      "overall consistency": 0.603564418833418,
+      "clip score": 0.8662096019759374
+    },
+    "temporal_quality": 0.8452439810649023,
+    "frame_wise_quality": 0.5963907734507128,
+    "text_alignment": 0.7348870104046777,
+    "final_score": 0.7236313038871816
+  },
+  "topk_k6_int4_int2_mb32": {
+    "name": "TK6 int4+int2",
+    "raw_scores": {
+      "aesthetic quality": 0.5686742884066441,
+      "background consistency": 0.9621595192758099,
+      "clip score": 0.3106599061385445,
+      "dynamic degree": 0.15760869565217392,
+      "imaging quality": 0.6687478882066258,
+      "motion smoothness": 0.9855960982238041,
+      "overall consistency": 0.22377140230863637,
+      "subject consistency": 0.9784925050333383
+    },
+    "norm_weighted": {
+      "subject consistency": 0.9748096802920336,
+      "background consistency": 0.9487603510843736,
+      "motion smoothness": 0.9591632872171666,
+      "dynamic degree": 0.07880434782608696,
+      "aesthetic quality": 0.5686742884066441,
+      "imaging quality": 0.6687478882066258,
+      "overall consistency": 0.6147565997490011,
+      "clip score": 0.8733761769427734
+    },
+    "temporal_quality": 0.8461536189770459,
+    "frame_wise_quality": 0.6187110883066349,
+    "text_alignment": 0.7440663883458872,
+    "final_score": 0.7347591605826498
+  },
+  "topk_k8_int4_int2_mb32": {
+    "name": "TK8 int4+int2",
+    "raw_scores": {
+      "aesthetic quality": 0.5769776731081631,
+      "background consistency": 0.9629895396185809,
+      "clip score": 0.31225463618402893,
+      "dynamic degree": 0.1766304347826087,
+      "imaging quality": 0.6801148005364382,
+      "motion smoothness": 0.9863255684499551,
+      "overall consistency": 0.2254455759615192,
+      "subject consistency": 0.9798028735328996
+    },
+    "norm_weighted": {
+      "subject consistency": 0.9763444290617236,
+      "background consistency": 0.949884278427327,
+      "motion smoothness": 0.9616657579758321,
+      "dynamic degree": 0.08831521739130435,
+      "aesthetic quality": 0.5769776731081631,
+      "imaging quality": 0.6801148005364382,
+      "overall consistency": 0.6193559779162616,
+      "clip score": 0.8778595338319621
+    },
+    "temporal_quality": 0.8503456236731963,
+    "frame_wise_quality": 0.6285462368223007,
+    "text_alignment": 0.7486077558741119,
+    "final_score": 0.7412782953730213
+  }
+}

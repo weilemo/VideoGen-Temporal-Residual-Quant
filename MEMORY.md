@@ -50,6 +50,7 @@
   - `importance-based top-k head-wise mixed precision`
   - `role-aware quantization`，即按 `sink / history / tail` 等时间角色分配不同 bit
 - `RandomHeadPolicy` 只是 head-wise quant 的 sanity-check baseline；后续论文方法重点应转向判断 head 重要性，再按 top-k 选择高精度 heads。
+- `naive-int2/int4` fake-quant 分支仅用作开发阶段的精度调试工具（量化后立即反量化回 bf16，不节省显存），不纳入任何实验线对比表格。论文中只比较 real-compression 方法（PRQ、packed-naive）。
 - 当前 head importance 主线重点关注三件事：
   - `importance metric`：怎样定义每个 head 的重要性分数。
   - `importance collection`：怎样离线或在线收集这些分数。

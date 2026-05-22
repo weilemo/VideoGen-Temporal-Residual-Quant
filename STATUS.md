@@ -6,8 +6,11 @@
 
 ## 正在做什么
 
-- importance top-k HWQ 已跑通并完成 VBench 评估（↓2.82% vs BF16），优于 random HWQ（↓3.19%），验证了 DMD-loss 选头的有效性
-- 核心论文指标：subject_consistency / background_consistency 几乎无损，退化集中在 aesthetic_quality / motion_smoothness
+- **32-prompt 大规模 VBench 全矩阵对比完成**（2026-05-22）：12 条实验线（含 k=8 int4+int2 修复），180 frames，MovieGenVideoBench 前 32 prompts
+- 核心发现：
+  - **int8+int4**: 全部变体在 ↓0.44% 以内，TK8 最优 ↓0.23%，近乎无损；Top-K vs Random 增益 +0.19pp
+  - **int4+int2**: TK8 ↓2.89% 最优，TK2 ↓5.20% 最差，top-k 优势明确（k 越大质量越好）；Top-K vs Random 增益 +0.34pp (TK4 vs Rand4)
+  - **k 的收益递减**: int8+int4 下 k=2/4/6/8 几乎无差（0.7609-0.7616），说明 int8+int4 精度足够高，2 个 high-precision head 就够；int4+int2 下 k 越大越好（TK2 ↓5.20% → TK8 ↓2.89%）
 - 当前最重要的研究工作聚焦三块：
   - `importance metric`：定义 head 重要性，例如量化敏感性、attention output 变化、denoising prediction 影响、跨 chunk 稳定性，或 identity/scene/motion 相关敏感性。
   - `importance collection`：确定离线 calibration、在线估计，或前几个 chunk calibration 后固定 policy。
@@ -15,6 +18,45 @@
 
 ## 最近完成
 
+- **32-prompt 全矩阵 VBench 对比 + k 消融 + int4+int2 sweep**（2026-05-22）：
+  - 完成 12 条实验线的 180-frames MovieGenVideoBench 评估（前 32 prompts）：
+  - **int8+int4 组**（6 线）：
+    | 实验线 | Final Score | vs BF16 | Peak VRAM | KV Cache |
+    |--------|------------|---------|-----------|----------|
+    | BF16 Baseline (32p) | 0.7633 | — | 61.9 GB | 48.2 GB |
+    | TK8 int8+int4 | 0.7616 | ↓0.23% | 37.4 GB | 23.4 GB |
+    | TK4 int8+int4 | 0.7615 | ↓0.25% | 33.6 GB | 19.7 GB |
+    | TK6 int8+int4 | 0.7609 | ↓0.31% | 35.4 GB | 22.1 GB |
+    | TK2 int8+int4 | 0.7609 | ↓0.32% | 31.7 GB | 18.2 GB |
+    | Rand4 int8+int4 | 0.7600 | ↓0.44% | 33.6 GB | 19.7 GB |
+  - **int4+int2 组**（5 线）：
+    | 实验线 | Final Score | vs BF16 | Peak VRAM | KV Cache |
+    |--------|------------|---------|-----------|----------|
+    | TK8 int4+int2 | 0.7413 | ↓2.89% | 28.6 GB | 14.4 GB |
+    | TK6 int4+int2 | 0.7348 | ↓3.75% | 27.6 GB | 13.4 GB |
+    | TK4 int4+int2 | 0.7302 | ↓4.34% | 26.7 GB | 12.4 GB |
+    | Rand4 int4+int2 | 0.7268 | ↓4.79% | 26.7 GB | 12.4 GB |
+    | TK2 int4+int2 | 0.7236 | ↓5.20% | 25.8 GB | 11.5 GB |
+  - 关键结论：
+    - int8+int4 精度下 top-k 优势微弱（k=2/4/6/8 几乎持平），说明 int8+int4 精度已经足够高
+    - int4+int2 精度下 top-k 优势显著且 k 越大越好（↓5.20% → ↓2.89%），head importance 的价值在低精度场景更突出
+    - Top-K vs Random 增益：int8+int4 +0.19pp，int4+int2 +0.34pp (TK4 vs Rand4)
+    - KV Cache 压缩与 k 近似线性：int8+int4 每增加 2 heads ≈ +2 GB，int4+int2 每增加 2 heads ≈ +1 GB
+  - k=8 int4+int2 评估遇 "Too many open files" 错误，修复后所有 8 维度评估完成
+  - 新增 top-k policies: `assets/head_importance/top2_dmd_loss.json`, `top6_dmd_loss.json`, `top8_dmd_loss.json`
+  - 更新 `aggregate_results.py` 支持分组相对退化比较
+
+- **Top-K HWQ int8+int4 32-prompt VBench 大规模对比**（2026-05-20）：
+  - 使用 MovieGenVideoBench 前 32 prompts，180 frames，评估 2 条实验线各 32 条视频：
+    | 实验线 | Final Score | vs BF16 | Peak VRAM | KV Cache |
+    |--------|------------|---------|-----------|----------|
+    | BF16 Baseline (32p) | 0.7633 | — | 61.9 GB | 48.2 GB |
+    | **Top-K HWQ int8+int4 (32p)** | **0.7615** | **↓0.23%** | **33.6 GB** | **19.7 GB (2.45×)** |
+  - 8 个维度几乎全部持平：subject_consistency ↓0.01%, background_consistency ↓0.12%, motion_smoothness ↓0.06%
+  - 结论：Top-K HWQ int8+int4 几乎无损（↓0.23%），且 KV Cache 压缩 2.45×，Peak VRAM 降低 45.7%
+  - 该结果有力支撑了论文核心主张：head-wise 混合精度 + importance top-k 策略可以在不损失视频质量的前提下实现显著显存压缩
+  - 新增：`assets/moviegenbench_32.txt` (32-prompt subset)、`results/selfforcing/vbench_eval_mb32/comparison_summary.json`
+  - 更新 `aggregate_results.py` 支持新实验标签
 - **拷贝 Focused-Forcing 参考代码与 DMD loss 数据**（2026-05-17）：
   - 将 `/data2/moweile-20251213/workspace/focused-forcing-code` 拷贝到 `external/focused-forcing-code/`
   - 新增 `external/README.md`，明确 `external/` 用于存放外部参考代码和分析结果，`HeadWiseKVQuant/` 继续作为主方法代码库
@@ -106,21 +148,25 @@
 ## 当前阻塞 / 未完成
 
 - head importance 目前采用 focused-forcing head ablation 的 DMD loss 聚合；后续仍需评估它和 identity / scene / motion 质量维度的相关性。
-- 当前 per-layer top-4 DMD-loss heads 质量提升 vs random 仅 +0.38pp，可能需要更好的 importance metric 或更细粒度的 policy（per-chunk, K/V 分开）
-- Top-K HWQ Packed 仍落后 PRQ 路线（↓2.82% vs ↓1.07%），int8+int4 配置的 top-k 版本尚未测试
+- Top-K vs random 的增益在 int4+int2 下仅 +0.38pp（0.6303 vs 0.6279），在 int8+int4 下尚未有 random 对照
+- 当前 per-layer top-4 DMD-loss 策略可能过于粗略：per-chunk top-k、K/V 分开选头、不同 prompt 类型自适应等更细粒度策略尚未实验
 
 ## 下一步
 
-- **优先**: Top-K HWQ + int8+int4 配置（`HIGH_PRECISION_QUANT_TYPE=packed-naive-int8 LOW_PRECISION_QUANT_TYPE=packed-naive-int4`），预期逼近 PRQ 质量线
-- 探索其他 importance metric（量化敏感性、attention output 变化、跨 chunk 稳定性）
-- 实验更细粒度 policy：per-chunk top-k、K/V 分开选头
-- R-HWQ-2h 消融实验
+- **优先**: 统一实验矩阵已基本完成，接下来聚焦：
+  - Top-K × PRQ 叠加：DMD top-4 + PRQ int4+int2，可能的 SOTA 路线
+  - QVG PRQ INT2 的 32-prompt 结果，完成 BF16 / PRQ / Top-K 三足对照
+  - 探索更优 importance metric（当前 DMD loss 在 int8+int4 下 top-k vs random 仅 +0.19pp）
+- **论文叙事方向**：
+  - int8+int4 全部方案近乎无损（<0.5%），可作为 "安全压缩" 定位
+  - int4+int2 需要 top-k head importance（↓2.89% vs ↓5.20%），展示 head-wise 价值
+  - k 的收益递减分析：int8+int4 仅需 k=2，int4+int2 需 k=8
 - 统一实验矩阵当前状态：
-  - BF16 baseline：✅ ↓0.00%，~80 GB
-  - QVG INT2 (PRQ)：✅ ↓0.26%，~20 GB
-  - R-HWQ-4h PRQ (int4+int2)：✅ ↓1.07%，~20 GB
-  - R-HWQ-4h Packed (int8+int4)：✅ ↓0.10%，~40 GB
-  - R-HWQ-4h Packed (int4+int2)：✅ ↓3.19%，~26 GB
-  - **Top-K HWQ Packed (int4+int2)**：✅ ↓2.82%，26 GB
-  - Top-K HWQ Packed (int8+int4)：❌ 待跑
+  - BF16 baseline：✅ ↓0.00%，~80 GB (2p) / ✅ 61.9 GB (32p)
+  - QVG INT2 (PRQ)：✅ ↓0.26%，~20 GB (2p) / ❌ 待跑 32p
+  - R-HWQ-4h PRQ (int4+int2)：✅ ↓1.07%，~20 GB (2p)
+  - R-HWQ-4h Packed (int8+int4)：✅ ↓0.10%，~40 GB (2p) / ✅ Rand4 ↓0.44% (32p)
+  - R-HWQ-4h Packed (int4+int2)：✅ ↓3.19%，~26 GB (2p) / ✅ Rand4 ↓4.79% (32p)
+  - Top-K HWQ Packed (int4+int2)：✅ ↓2.82%，26 GB (2p) / ✅ TK4 ↓4.34% (32p)
+  - Top-K HWQ Packed (int8+int4)：✅ ↓0.23%, 33.6 GB (32p) / ✅ k-sweep 全完成
   - R-HWQ-2h：❌ 待跑

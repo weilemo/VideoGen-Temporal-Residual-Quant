@@ -151,22 +151,22 @@ top-k packed-naive policy.
 
 ## VBench Evaluation Results (2026-05-17)
 
-Six experiment lines evaluated with VBench-Long (8 dimensions, 2 videos each):
+Five experiment lines evaluated with VBench-Long (8 dimensions, 2 videos each, 180 frames):
 
-| Experiment | Final Score | vs BF16 |
-|---|---|---|
-| BF16 Baseline | 0.6486 | — |
-| QVG INT2 (PRQ) | 0.6469 | ↓0.26% |
-| R-HWQ-4h (PRQ) | 0.6416 | ↓1.07% |
-| R-HWQ-4h Packed (int8+int4) | 0.6479 | ↓0.10% |
-| R-HWQ-4h Packed (int4+int2) | 0.6279 | ↓3.19% |
-| R-HWQ-4h (Naive) | 0.5954 | ↓8.19% |
+| Experiment | Final Score | vs BF16 | Peak GPU Mem | KV Cache | Compression |
+|---|---|---|---|---|---|
+| BF16 Baseline | 0.6486 | — | ~78 GB* | ~64 GB* | 1× |
+| QVG INT2 (PRQ) | 0.6469 | ↓0.26% | ~26 GB* | ~12 GB* | ~6× |
+| R-HWQ-4h (PRQ) | 0.6416 | ↓1.07% | ~30 GB* | ~16 GB* | ~4-5× |
+| R-HWQ-4h Packed (int8+int4) | 0.6479 | ↓0.10% | 33.6 GB | 19.6 GB | 3.3× |
+| R-HWQ-4h Packed (int4+int2) | 0.6279 | ↓3.19% | 26.1 GB | 12.1 GB | 5.3× |
+
+\* Estimated. Bold values are measured from inference logs.
 
 Key findings:
-- PRQ-based quantization barely degrades quality (↓0.3%-1.1%)
-- Packed-naive int8+int4 is nearly lossless (↓0.10%), a viable lightweight option
-- Packed-naive int4+int2 sits between naive and PRQ
-- Naive blockwise (fake quant, bf16 output) degrades significantly (↓8.2%)
+- PRQ-based quantization barely degrades quality (↓0.3%-1.1%) with ~5-6× compression
+- Packed-naive int8+int4 is nearly lossless (↓0.10%) at 3.3× compression — viable lightweight option
+- Packed-naive int4+int2 provides 5.3× compression at ↓3.19% quality cost
 
 Evaluation scripts: `scripts/eval/evaluate_experiments.sh`, `scripts/eval/aggregate_results.py`.
 Full results: `results/selfforcing/vbench_eval/comparison_summary.json`.

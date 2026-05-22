@@ -51,6 +51,20 @@ LABEL_ORDER = [
     "rhwq_4h_naive",
     "rhwq_4h_packed_int4_int2",
     "rhwq_4h_packed_int8_int4",
+    "topk_hwq_packed_int4_int2",
+    # 32-prompt MovieGenVideoBench comparison
+    "bf16_mb32",
+    "topk_hwq_int8_int4_mb32",
+    "rhwq_random_int8_int4_mb32",
+    "topk_k2_int8_int4_mb32",
+    "topk_k6_int8_int4_mb32",
+    "topk_k8_int8_int4_mb32",
+    # int4+int2 32-prompt k-sweep
+    "rhwq_random_int4_int2_mb32",
+    "topk_k4_int4_int2_mb32",
+    "topk_k2_int4_int2_mb32",
+    "topk_k6_int4_int2_mb32",
+    "topk_k8_int4_int2_mb32",
 ]
 
 LABEL_NAMES = {
@@ -60,6 +74,20 @@ LABEL_NAMES = {
     "rhwq_4h_naive": "R-HWQ-4h (Naive)",
     "rhwq_4h_packed_int4_int2": "R-HWQ-4h Packed (int4+int2)",
     "rhwq_4h_packed_int8_int4": "R-HWQ-4h Packed (int8+int4)",
+    "topk_hwq_packed_int4_int2": "Top-K HWQ Packed (int4+int2)",
+    # int8+int4
+    "bf16_mb32": "BF16 Baseline",
+    "topk_hwq_int8_int4_mb32": "TK4 int8+int4",
+    "rhwq_random_int8_int4_mb32": "Rand4 int8+int4",
+    "topk_k2_int8_int4_mb32": "TK2 int8+int4",
+    "topk_k6_int8_int4_mb32": "TK6 int8+int4",
+    "topk_k8_int8_int4_mb32": "TK8 int8+int4",
+    # int4+int2
+    "rhwq_random_int4_int2_mb32": "Rand4 int4+int2",
+    "topk_k4_int4_int2_mb32": "TK4 int4+int2",
+    "topk_k2_int4_int2_mb32": "TK2 int4+int2",
+    "topk_k6_int4_int2_mb32": "TK6 int4+int2",
+    "topk_k8_int4_int2_mb32": "TK8 int4+int2",
 }
 
 
@@ -228,16 +256,21 @@ def print_comparison_table(all_results):
 
     print("=" * len(header))
 
-    # Relative degradation vs BF16
+    # Relative degradation vs BF16 (separate into 2-prompt and 32-prompt groups)
     print("\n--- Relative to BF16 Baseline ---")
-    bf16_final = all_results.get("bf16_baseline", {}).get("final_score")
-    if bf16_final:
-        for label in LABEL_ORDER[1:]:
-            if label in all_results:
-                final = all_results[label].get("final_score")
-                if final is not None:
-                    degradation = (bf16_final - final) / bf16_final * 100
-                    print(f"  {LABEL_NAMES[label]:<22}: {final:.4f} (↓{degradation:.2f}% vs BF16)")
+    for bf16_label in ["bf16_baseline", "bf16_mb32"]:
+        bf16_final = all_results.get(bf16_label, {}).get("final_score")
+        if not bf16_final:
+            continue
+        group_name = "32-prompt" if "mb32" in bf16_label else "2-prompt"
+        print(f"\n  [{group_name} group, vs {LABEL_NAMES[bf16_label]}: {bf16_final:.4f}]")
+        for label in LABEL_ORDER:
+            if label == bf16_label or label not in all_results:
+                continue
+            final = all_results[label].get("final_score")
+            if final is not None:
+                degradation = (bf16_final - final) / bf16_final * 100
+                print(f"    {LABEL_NAMES[label]:<22}: {final:.4f} (↓{degradation:.2f}%)")
 
 
 def main():
