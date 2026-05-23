@@ -2,13 +2,23 @@
 
 ## 项目定位
 
-- 项目目录：`/data2/moweile-20251213/workspace/videoquant`
+- 项目管理入口：`/mnt/workspace/caipeiliang/code/moweile/videoquant`（detached HEAD，仅管理 worktree）
 - 这是一个面向长视频自回归 diffusion 生成的研究项目工作区。
 - 项目目标：研究 KV cache quantization，尽量在显著压缩历史 KV 显存占用的同时，保持长时视频质量，重点关注 `identity consistency`、`scene consistency` 和 `motion continuity`。
 - 当前可见子目录：
   - `HeadWiseKVQuant` — 论文方法主代码库（head-wise KV cache quantization）
   - `forcing` — 上游模型和 VBench 评估代码
   - `Quant-VideoGen` — QVG 原始实验仓（保留作参考）
+
+## Worktree 隔离布局
+
+- 2026-05-23 起，日常开发不在原目录切分支，而是使用兄弟 worktree：
+  - `videoquant-main` → `main`
+  - `videoquant-prompt` → `HWQ_prompt_router`
+  - `videoquant-online` → `hwq_online_calibration`
+  - `videoquant-hrq` → `feature/hwq-residual-quant`
+- 原目录 `videoquant/` 用于 `git worktree list`、`git branch -vv`、`git worktree add/remove/prune` 等管理操作。
+- 若 agent 要改某个方向，必须进入对应 worktree，避免共享脏工作树。
 
 ## 当前问题定义
 
@@ -72,8 +82,8 @@
 - 训练、推理、评测、批处理等长任务，默认通过 Slurm 运行。
 - 登录节点只做编辑、查看日志、提交作业、短时间调试。
 - 正式任务尽量记录：脚本路径、环境名、资源申请、日志路径、输出路径、`jobid`。
-- `videoquant` 相关 Slurm 日志与实验输出不一定落在本地工作区 `/data2/...`，经常会落在共享盘工作区 `/mnt/users/moweile-20251213/workspace/videoquant/Quant-VideoGen/` 下；查实验结果时需要同时检查这一路径。
-- 后续如果实验结果或 Slurm 日志先输出到 `/mnt/users/moweile-20251213/workspace/videoquant/...`，默认自动同步一份回 `/data2/moweile-20251213/workspace/videoquant/...` 的对应项目目录，避免结果只留在共享盘运行副本。
+- `videoquant` 相关 Slurm 日志与实验输出不一定落在当前 worktree，可能落在共享盘运行副本或 `HeadWiseKVQuant/results/` 下；查实验结果时需要同时检查运行脚本里的 `OUTPUT_FOLDER`。
+- 后续如果实验结果或 Slurm 日志先输出到共享盘运行副本，默认同步一份回当前方向对应的 `videoquant-*` worktree 或 `HeadWiseKVQuant/results/` 记录目录，避免结果只留在临时运行副本。
 
 ## Slurm 与服务器规则
 

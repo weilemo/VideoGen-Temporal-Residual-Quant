@@ -6,6 +6,14 @@
 
 ## 正在做什么
 
+- **工作区已改为 Git worktree 隔离模式**（2026-05-23）：
+  - 原目录 `/mnt/workspace/caipeiliang/code/moweile/videoquant` 只作为 detached HEAD 管理入口。
+  - `videoquant-main` 对应 `main`。
+  - `videoquant-prompt` 对应 `HWQ_prompt_router`，commit `345ecf7`。
+  - `videoquant-online` 对应 `hwq_online_calibration`，commit `d1bf3eb`。
+  - `videoquant-hrq` 对应 `feature/hwq-residual-quant`，commit `3ee4612`。
+  - prompt / online 两分支已做 `git merge-tree` dry-run，未来互相合并无文本冲突 marker。
+
 - **32-prompt 大规模 VBench 全矩阵对比完成**（2026-05-22）：12 条实验线（含 k=8 int4+int2 修复），180 frames，MovieGenVideoBench 前 32 prompts
 - 核心发现：
   - **int8+int4**: 全部变体在 ↓0.44% 以内，TK8 最优 ↓0.23%，近乎无损；Top-K vs Random 增益 +0.19pp
@@ -157,6 +165,8 @@
   - Top-K × PRQ 叠加：DMD top-4 + PRQ int4+int2，可能的 SOTA 路线
   - QVG PRQ INT2 的 32-prompt 结果，完成 BF16 / PRQ / Top-K 三足对照
   - 探索更优 importance metric（当前 DMD loss 在 int8+int4 下 top-k vs random 仅 +0.19pp）
+  - Prompt-adaptive policy：在 `videoquant-prompt` 中基于 `HWQ_prompt_router` 继续构造 bucket-specific policies。
+  - First-chunks online calibration：在 `videoquant-online` 中继续验证 runtime policy 的质量和 selected-head overlap。
 - **论文叙事方向**：
   - int8+int4 全部方案近乎无损（<0.5%），可作为 "安全压缩" 定位
   - int4+int2 需要 top-k head importance（↓2.89% vs ↓5.20%），展示 head-wise 价值

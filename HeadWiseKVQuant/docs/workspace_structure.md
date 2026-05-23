@@ -1,6 +1,22 @@
 # Workspace Structure
 
-`HeadWiseKVQuant` should be treated as the main research workspace.
+`HeadWiseKVQuant` should be treated as the main research workspace inside each branch-specific worktree.
+
+## Repository Worktrees
+
+The parent `videoquant` checkout is now only a detached-HEAD management entrypoint. Use one sibling worktree per research direction:
+
+```text
+/mnt/workspace/caipeiliang/code/moweile/
+  videoquant/          # worktree management only
+  videoquant-main/     # main
+  videoquant-prompt/   # HWQ_prompt_router
+  videoquant-online/   # hwq_online_calibration
+  videoquant-hrq/      # feature/hwq-residual-quant
+```
+
+Do not develop by repeatedly switching branches in `videoquant/`; enter the matching `videoquant-*` directory first.
+
 
 ```text
 videoquant/
