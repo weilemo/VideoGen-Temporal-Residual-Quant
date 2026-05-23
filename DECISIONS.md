@@ -101,3 +101,15 @@
   - BF16 (0.6486) ≈ Packed int8+int4 (0.6479, ↓0.10%) ≈ QVG INT2 (0.6469, ↓0.26%) > R-HWQ-4h PRQ (0.6416, ↓1.07%) > Packed int4+int2 (0.6279, ↓3.19%) > Naive (0.5954, ↓8.19%)
   - int8+int4 packed-naive 几乎无损，且无需 k-means 聚类，适合作为论文中的轻量化 baseline
 - 影响：后续实验矩阵中 packed-naive 的推荐默认配置为 int8+int4 (R-HWQ-4h)；int4+int2 退化明显，不适合作为 low-bit 场景的首选
+
+## D-2026-05-23-14 用 Git worktree 隔离并行研究分支
+
+- 决策：`videoquant` 原目录改为 detached HEAD 管理入口，`main`、prompt router、online calibration、HRQ residual quant 分别使用独立兄弟 worktree。
+- 原因：多个 agent / Claude Code / Codex 同时工作时，共享一个 checkout 会导致未提交改动随 `git checkout` 漂移，甚至互相切走当前分支。
+- 当前布局：
+  - `/mnt/workspace/caipeiliang/code/moweile/videoquant-main` → `main`
+  - `/mnt/workspace/caipeiliang/code/moweile/videoquant-prompt` → `HWQ_prompt_router`
+  - `/mnt/workspace/caipeiliang/code/moweile/videoquant-online` → `hwq_online_calibration`
+  - `/mnt/workspace/caipeiliang/code/moweile/videoquant-hrq` → `feature/hwq-residual-quant`
+- 影响：后续任务必须先进入对应 `videoquant-*` 目录；原目录只用于 `git worktree list`、`git branch -vv`、`git worktree add/remove/prune`。
+- 进一步约定：实验结果、`HeadWiseKVQuant/tmp/`、Mac `._*` 文件和 docs PDF 通过本地 exclude 排除，不进入方法分支。

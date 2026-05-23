@@ -1,5 +1,25 @@
 # 快速交接
 
+## 先选 worktree
+
+不要在原目录 `/mnt/workspace/caipeiliang/code/moweile/videoquant` 里开发或切长期分支；它现在是 detached HEAD 管理入口。先按任务进入对应目录：
+
+```bash
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant-main     # main / 文档与稳定基线
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant-prompt   # HWQ_prompt_router
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant-online   # hwq_online_calibration
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant-hrq      # feature/hwq-residual-quant
+```
+
+当前分支隔离状态（2026-05-23）：
+
+| 目录 | 分支 | 用途 |
+|---|---|---|
+| `videoquant-main` | `main` | 稳定文档与基线 |
+| `videoquant-prompt` | `HWQ_prompt_router` | Proposal 1: prompt router with multiple offline policies |
+| `videoquant-online` | `hwq_online_calibration` | Proposal 2: first-chunks online calibration |
+| `videoquant-hrq` | `feature/hwq-residual-quant` | HRQ residual quant backend |
+
 ## 当前接力点
 
 - `Self-Forcing` 八条实验线均已跑通，七条完成 VBench 评估（2-prompt），一条完成 32-prompt VBench 评估：

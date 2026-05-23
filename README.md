@@ -4,7 +4,37 @@
 
 这套记录文件专门服务 `workspace/videoquant`，供 `Codex` 和 `CC` 在服务器上共同接手开发、训练、调试、评测与作业排查。
 
-## 目录
+## 当前 worktree 布局
+
+`/mnt/workspace/caipeiliang/code/moweile/videoquant` 现在只作为 Git worktree 管理入口，不再作为日常开发目录。
+
+```text
+/mnt/workspace/caipeiliang/code/moweile/
+  videoquant/          # 原目录，detached HEAD，只做 worktree 管理入口
+  videoquant-main/     # main 分支
+  videoquant-prompt/   # HWQ_prompt_router 分支
+  videoquant-online/   # hwq_online_calibration 分支
+  videoquant-hrq/      # feature/hwq-residual-quant 分支
+```
+
+进入方向：
+
+```bash
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant-main     # main / 文档与稳定基线
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant-prompt   # prompt router
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant-online   # online calibration
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant-hrq      # HRQ residual quant
+```
+
+查看所有 worktree：
+
+```bash
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant
+git worktree list
+git branch -vv
+```
+
+## 记录文件
 
 - `README.md`：说明如何使用这套记录。
 - `MEMORY.md`：长期稳定事实。
@@ -16,11 +46,12 @@
 
 ## 每次开始任务先看什么
 
-1. `STATUS.md`
-2. `HANDOFF.md`
-3. `MEMORY.md`
-4. `DECISIONS.md`
-5. 需要上下文细节时，再看 `logs/` 最近几条
+1. 先进入对应 worktree，而不是原目录。
+2. `STATUS.md`
+3. `HANDOFF.md`
+4. `MEMORY.md`
+5. `DECISIONS.md`
+6. 需要上下文细节时，再看 `logs/` 最近几条。
 
 ## 维护规则
 
@@ -32,5 +63,5 @@
 
 ## 建议命名
 
-- 任务日志：`logs/2026-05-06_1530_训练排查.md`
+- 任务日志：`logs/2026-05-23_1230_worktree_reorg.md`
 - 如果涉及 Slurm，标题里尽量写脚本名、`jobid` 或节点信息。
