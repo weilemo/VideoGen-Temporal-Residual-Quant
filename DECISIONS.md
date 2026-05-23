@@ -2,7 +2,7 @@
 
 ## D-2026-05-06-01 项目级记录放在 `videoquant` 目录下
 
-- 决策：这套协作记录放在 `/data2/moweile-20251213/workspace/videoquant`。
+- 决策：这套协作记录放在 `/mnt/workspace/caipeiliang/code/moweile/videoquant`。
 - 原因：每个项目应维护自己的上下文，避免跨项目混用状态。
 - 影响：`Codex` 和 `CC` 处理 `videoquant` 时，默认先看本目录记录文件。
 
@@ -42,7 +42,7 @@
 
 ## D-2026-05-08-07 独立出 `HeadWiseKVQuant` 作为论文方法代码库
 
-- 决策：从 `Quant-VideoGen` 中抽出 KV cache 低精度量化框架，建立独立代码库 `/data2/moweile-20251213/workspace/videoquant/HeadWiseKVQuant`。
+- 决策：从 `Quant-VideoGen` 中抽出 KV cache 低精度量化框架，建立独立代码库 `/mnt/workspace/caipeiliang/code/moweile/videoquant-main/HeadWiseKVQuant`。
 - 原因：后续论文方法不应长期绑在 QVG 实验仓里；独立库更适合作为 `head-wise quant` 方法主体，便于模块化、复现实验和后续开源整理。
 - 影响：后续方法开发优先发生在 `HeadWiseKVQuant/src/hwq/`；`Quant-VideoGen` 的 `Self-Forcing` 代码应逐步退化为下游调用方，只负责推理调度和实验输出。
 
