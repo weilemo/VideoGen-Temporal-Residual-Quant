@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 import torch
 from enum import Enum
 import re
@@ -18,6 +19,62 @@ from .functions import (
 )
 from .packed_naive import packed_naive_quantize_tensor
 from .real.hrq import hrq_quantize_tensor
+
+# ── Per-process predictor param cache ──────────────────────────────
+_HRQ_PREDICTOR_CACHE: dict[str, dict | None] = {}
+
+
+def _resolve_hrq_params_path(quant_config, mode: str) -> str | None:
+    explicit = getattr(quant_config, "hrq_predictor_params_path", None)
+    if explicit:
+        return explicit
+    params_dir = os.environ.get("HRQ_PREDICTOR_PARAMS_DIR", "assets/hrq_predictors")
+    return os.path.join(params_dir, f"{mode}_self_forcing_dmd.pt")
+
+
+def _load_hrq_predictor_params_lazy(quant_config) -> dict | None:
+    """Lazy-load and cache predictor params from disk; returns None for identity."""
+    mode = getattr(quant_config, "hrq_predictor_mode", "identity")
+    if mode == "identity":
+        return None
+    path = _resolve_hrq_params_path(quant_config, mode)
+    if path is None:
+        return None
+    if path in _HRQ_PREDICTOR_CACHE:
+        return _HRQ_PREDICTOR_CACHE[path]
+    if not os.path.exists(path):
+        print(f"[HRQ] WARNING: predictor params not found at {path!r}; "
+              "falling back to identity predictor.")
+        _HRQ_PREDICTOR_CACHE[path] = None
+        return None
+    params = torch.load(path, map_location="cpu", weights_only=False)
+    _HRQ_PREDICTOR_CACHE[path] = params
+    print(f"[HRQ] Loaded predictor params ({mode}) from {path!r}")
+    return params
+
+
+def _get_layer_predictor_params(quant_config, layer_idx: int | None,
+                                 kv_key: str, head_ids=None) -> dict | None:
+    """Return predictor_params for one hrq_quantize_tensor call (layer + K or V).
+
+    For affine_channel, slices alpha/beta by *head_ids* when provided.
+    For tiny_mlp, the MLP is head-agnostic so no slicing is needed.
+    """
+    if layer_idx is None:
+        return None
+    full = _load_hrq_predictor_params_lazy(quant_config)
+    if full is None:
+        return None
+    params = full.get(kv_key, {}).get(layer_idx)
+    if params is None:
+        return None
+    if head_ids is not None and "alpha" in params:
+        idx = torch.tensor(list(head_ids), dtype=torch.long)
+        params = {
+            "alpha": params["alpha"][idx],
+            "beta": params["beta"][idx],
+        }
+    return params
 
 
 ########################################################
@@ -187,7 +244,8 @@ def get_quantize_type(quant_type: str):
     return quantize_type
 
 
-def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_config: QuantizeConfig, quantize_fn: callable):
+def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_config: QuantizeConfig, quantize_fn: callable,
+                      layer_idx: int | None = None, head_ids=None):
     quantize_type = get_quantize_type(quant_type)
 
     if quantize_type == QuantizeFunctions.NSTAGE_KMEANS:
@@ -297,13 +355,17 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
         )
     elif quantize_type == QuantizeFunctions.HRQ:
         num_bits = quantize_fn(k)
+        _predictor_mode = getattr(quant_config, "hrq_predictor_mode", "identity")
+        _k_params = _get_layer_predictor_params(quant_config, layer_idx, "K", head_ids)
+        _v_params = _get_layer_predictor_params(quant_config, layer_idx, "V", head_ids)
         k_quant = hrq_quantize_tensor(
             k,
             num_bits=num_bits,
             block_size=getattr(quant_config, "hrq_group_size", quant_config.quant_block_size),
             anchor_bits=getattr(quant_config, "hrq_anchor_bits", 4),
             predictor_stride=getattr(quant_config, "hrq_predictor_stride", 1560),
-            predictor_mode=getattr(quant_config, "hrq_predictor_mode", "identity"),
+            predictor_mode=_predictor_mode,
+            predictor_params=_k_params,
             scale_precision=getattr(quant_config, "hrq_scale_precision", torch.bfloat16),
             residual_quant_mode=getattr(quant_config, "hrq_residual_quant_mode", "asym_zero_point"),
         )
@@ -313,7 +375,8 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
             block_size=getattr(quant_config, "hrq_group_size", quant_config.quant_block_size),
             anchor_bits=getattr(quant_config, "hrq_anchor_bits", 4),
             predictor_stride=getattr(quant_config, "hrq_predictor_stride", 1560),
-            predictor_mode=getattr(quant_config, "hrq_predictor_mode", "identity"),
+            predictor_mode=_predictor_mode,
+            predictor_params=_v_params,
             scale_precision=getattr(quant_config, "hrq_scale_precision", torch.bfloat16),
             residual_quant_mode=getattr(quant_config, "hrq_residual_quant_mode", "asym_zero_point"),
         )

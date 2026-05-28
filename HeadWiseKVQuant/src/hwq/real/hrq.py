@@ -3,8 +3,10 @@ from __future__ import annotations
 import math
 import re
 import torch
+import torch.nn.functional as F
 
 SUPPORTED_BITS = (2, 4, 8)
+_SUPPORTED_PREDICTOR_MODES = ("identity", "affine_channel", "tiny_mlp")
 
 def extract_hrq_bits(quant_type: str) -> int:
     m = re.search(r"int(\d+)", quant_type)
@@ -12,7 +14,18 @@ def extract_hrq_bits(quant_type: str) -> int:
         raise ValueError(f"Cannot identify num_bits from {quant_type}")
     return _validate_bits(int(m.group(1)))
 
-def hrq_quantize_tensor(tensor: torch.Tensor, *, num_bits: int, block_size: int, anchor_bits: int = 4, predictor_stride: int = 1560, predictor_mode: str = "identity", scale_precision: torch.dtype | str = torch.bfloat16, residual_quant_mode: str = "asym_zero_point") -> dict:
+def hrq_quantize_tensor(
+    tensor: torch.Tensor,
+    *,
+    num_bits: int,
+    block_size: int,
+    anchor_bits: int = 4,
+    predictor_stride: int = 1560,
+    predictor_mode: str = "identity",
+    predictor_params: dict | None = None,
+    scale_precision: torch.dtype | str = torch.bfloat16,
+    residual_quant_mode: str = "asym_zero_point",
+) -> dict:
     if tensor.ndim != 4:
         raise ValueError(f"hrq expects [B, H, S, D], got {tuple(tensor.shape)}")
     num_bits = _validate_bits(num_bits)
@@ -35,7 +48,7 @@ def hrq_quantize_tensor(tensor: torch.Tensor, *, num_bits: int, block_size: int,
     while offset < seq_len:
         unit_len = min(predictor_stride, seq_len - offset)
         current = tensor[:, :, offset:offset + unit_len, :]
-        pred = _predict(prev[:, :, :unit_len, :], predictor_mode)
+        pred = _predict(prev[:, :, :unit_len, :], predictor_mode, predictor_params)
         residual = current.float() - pred
         q, scales, zps = _quantize_asym(residual, num_bits, block_size, padded_dim, scale_precision)
         residual_recon = _dequantize_asym(q, scales, zps, num_bits, block_size, head_dim, padded_dim, torch.float32)
@@ -63,7 +76,12 @@ def hrq_quantize_tensor(tensor: torch.Tensor, *, num_bits: int, block_size: int,
         "residual_quant_mode": residual_quant_mode,
     }
 
-def hrq_dequantize_tensor(packed_state: dict, *, output_dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
+def hrq_dequantize_tensor(
+    packed_state: dict,
+    *,
+    output_dtype: torch.dtype = torch.bfloat16,
+    predictor_params: dict | None = None,
+) -> torch.Tensor:
     if packed_state.get("format") != "hrq":
         raise ValueError(f"Unsupported HRQ format: {packed_state.get(format)}")
     bsz, heads, seq_len, head_dim = [int(x) for x in packed_state["shape"]]
@@ -85,7 +103,7 @@ def hrq_dequantize_tensor(packed_state: dict, *, output_dtype: torch.dtype = tor
         s = s_all[:, :, residual_offset:residual_offset + unit_len, :]
         z = z_all[:, :, residual_offset:residual_offset + unit_len, :]
         residual_offset += unit_len
-        pred = _predict(prev[:, :, :unit_len, :], predictor_mode)
+        pred = _predict(prev[:, :, :unit_len, :], predictor_mode, predictor_params)
         residual = _dequantize_asym(q, s, z, num_bits, block_size, head_dim, padded_dim, torch.float32)
         current = (pred + residual).to(output_dtype)
         outputs.append(current)
@@ -164,10 +182,39 @@ def _pad(x, padded_dim):
 def _expand(params, block_size, padded_dim):
     return params.float().unsqueeze(-1).expand(*params.shape, block_size).reshape(*params.shape[:-1], padded_dim)
 
-def _predict(prev, predictor_mode):
-    if predictor_mode != "identity":
-        raise ValueError(f"hrq v1 only supports predictor_mode=identity, got {predictor_mode}")
-    return prev.float()
+def _predict(prev: torch.Tensor, predictor_mode: str, predictor_params: dict | None) -> torch.Tensor:
+    """Return float32 prediction of the next chunk given the previous chunk.
+
+    Args:
+        prev: [B, H, S, D] in the model's native dtype.
+        predictor_mode: one of "identity", "affine_channel", "tiny_mlp".
+        predictor_params: dict of pre-fitted params (ignored for identity).
+    """
+    if predictor_mode == "identity":
+        return prev.float()
+
+    if predictor_mode == "affine_channel":
+        if predictor_params is None:
+            return prev.float()
+        alpha = predictor_params["alpha"].to(prev.device, torch.float32)  # [H, D]
+        beta = predictor_params["beta"].to(prev.device, torch.float32)   # [H, D]
+        # Broadcast [H, D] → [1, H, 1, D]
+        return alpha.unsqueeze(0).unsqueeze(2) * prev.float() + beta.unsqueeze(0).unsqueeze(2)
+
+    if predictor_mode == "tiny_mlp":
+        if predictor_params is None:
+            return prev.float()
+        B, H, S, D = prev.shape
+        x = prev.float().reshape(-1, D)
+        w1 = predictor_params["fc1_weight"].to(prev.device, torch.float32)
+        b1 = predictor_params["fc1_bias"].to(prev.device, torch.float32)
+        w2 = predictor_params["fc2_weight"].to(prev.device, torch.float32)
+        b2 = predictor_params["fc2_bias"].to(prev.device, torch.float32)
+        h = F.gelu(F.linear(x, w1, b1))
+        out = F.linear(h, w2, b2)
+        return out.reshape(B, H, S, D)
+
+    raise ValueError(f"Unknown predictor_mode: {predictor_mode}")
 
 def _validate_bits(bits):
     bits = int(bits)
@@ -189,8 +236,10 @@ def _validate_stride(stride, seq_len):
 
 def _validate_predictor_mode(mode):
     mode = str(mode)
-    if mode != "identity":
-        raise ValueError(f"hrq v1 only supports predictor_mode=identity, got {mode}")
+    if mode not in _SUPPORTED_PREDICTOR_MODES:
+        raise ValueError(
+            f"hrq predictor_mode must be one of {_SUPPORTED_PREDICTOR_MODES}, got {mode!r}"
+        )
     return mode
 
 def _validate_residual_quant_mode(mode):

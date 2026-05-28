@@ -178,7 +178,8 @@ class CausalInferencePipeline(torch.nn.Module):
 
                 if self.headwise_policy is None:
                     k_quant, v_quant = compress_kv_cache(
-                        k, v, self.quant_config.quant_type, self.quant_config, quantize_fn
+                        k, v, self.quant_config.quant_type, self.quant_config, quantize_fn,
+                        layer_idx=layer_idx,
                     )
                 else:
                     k_quant, v_quant = compress_headwise_kv_cache(

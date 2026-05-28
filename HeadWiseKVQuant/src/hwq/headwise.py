@@ -318,6 +318,8 @@ def compress_headwise_kv_cache(
             group_config.quant_type,
             group_config,
             quantize_fn,
+            layer_idx=layer_idx,
+            head_ids=group.head_ids,
         )
 
         k_quant = _pack_single_cache(k_quant, k.dtype, group_config)

@@ -36,7 +36,12 @@ class QuantizeConfig:
     """Number of sequence tokens in one HRQ predictor unit."""
 
     hrq_predictor_mode: str = "identity"
-    """HRQ predictor mode. V1 supports identity."""
+    """HRQ predictor mode: identity, affine_channel, or tiny_mlp."""
+
+    hrq_predictor_params_path: str = ""
+    """Path to .pt file with fitted predictor params (affine_channel or tiny_mlp).
+    When empty, defaults to assets/hrq_predictors/{mode}_self_forcing_dmd.pt
+    (or overridden by HRQ_PREDICTOR_PARAMS_DIR env var)."""
 
     hrq_scale_precision: str = "bf16"
     """Scale dtype used by HRQ quantization."""

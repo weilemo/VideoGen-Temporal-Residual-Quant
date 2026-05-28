@@ -49,7 +49,8 @@ parser.add_argument("--num_prq_stages", type=int, default=1, help="Number of PRQ
 parser.add_argument("--hrq_group_size", type=int, default=64, help="Group size for HRQ quantization")
 parser.add_argument("--hrq_anchor_bits", type=int, default=4, help="Anchor bit width for HRQ")
 parser.add_argument("--hrq_predictor_stride", type=int, default=1560, help="Predictor stride for HRQ")
-parser.add_argument("--hrq_predictor_mode", type=str, default="identity", help="Predictor mode for HRQ")
+parser.add_argument("--hrq_predictor_mode", type=str, default="identity", help="Predictor mode for HRQ: identity, affine_channel, tiny_mlp")
+parser.add_argument("--hrq_predictor_params_path", type=str, default="", help="Path to fitted predictor params .pt (default: assets/hrq_predictors/{mode}_self_forcing_dmd.pt)")
 parser.add_argument("--hrq_scale_precision", type=str, default="bf16", help="Scale precision for HRQ")
 parser.add_argument("--hrq_residual_quant_mode", type=str, default="asym_zero_point", help="Residual quantization mode for HRQ")
 parser.add_argument("--headwise_mode", type=str, default="none", help="Head-wise policy mode: none, random, or topk")
@@ -101,6 +102,7 @@ config.quant_config = {
     "hrq_anchor_bits": args.hrq_anchor_bits,
     "hrq_predictor_stride": args.hrq_predictor_stride,
     "hrq_predictor_mode": args.hrq_predictor_mode,
+    "hrq_predictor_params_path": args.hrq_predictor_params_path,
     "hrq_scale_precision": args.hrq_scale_precision,
     "hrq_residual_quant_mode": args.hrq_residual_quant_mode,
     "headwise_mode": args.headwise_mode,
