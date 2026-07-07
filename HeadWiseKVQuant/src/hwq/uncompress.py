@@ -68,6 +68,9 @@ def uncompress_single_cache(cache: torch.Tensor | dict) -> torch.Tensor:
     if not isinstance(cache, dict):
         return cache
 
+    if cache.get("format") == "hrq":
+        return hrq_dequantize_tensor(cache, output_dtype=torch.bfloat16)
+
     info = cache["info"]
     output_dtype = info["output_dtype"]
 

@@ -403,7 +403,28 @@ def _fmt_stats(s: dict) -> str:
     return f"mean={s['mean']:.4f}  std={s['std']:.4f}  p95={s['p95']:.4f}  max={s['max']:.4f}"
 
 
+def _load_dump_all_layers(dump_path: str) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """Load all layers from a dump file.  Returns list of (k, v) in BHSD float32."""
+    data = torch.load(dump_path, map_location="cpu", weights_only=False)
+    kv_cache = data["kv_cache"]
+    out = []
+    for layer in kv_cache:
+        total_tokens = count_filled_tokens(layer["k"])
+        k = layer["k"].read(0, total_tokens).permute(0, 2, 1, 3).float().contiguous()
+        v = layer["v"].read(0, total_tokens).permute(0, 2, 1, 3).float().contiguous()
+        out.append((k, v))
+    # free the kv_cache objects so GC can reclaim memory
+    for layer in kv_cache:
+        for obj in layer.values():
+            if hasattr(obj, "chunks"):
+                obj.chunks = [None] * len(obj.chunks)
+    del data, kv_cache
+    return out
+
+
 def run_analysis(args):
+    import gc
+
     train_dumps = sorted(glob.glob(args.train_dumps) if "*" in args.train_dumps else args.train_dumps)
     heldout_dumps = sorted(glob.glob(args.heldout_dumps) if "*" in args.heldout_dumps else args.heldout_dumps)
 
@@ -438,76 +459,302 @@ def run_analysis(args):
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(args.report_path)), exist_ok=True)
 
-    # ── Storage for fitted params ────────────────────────────────────
-    affine_params = {"predictor_mode": "affine_channel",
-                     "num_layers": num_layers, "num_heads": num_heads, "head_dim": head_dim,
-                     "K": {}, "V": {}}
-    mlp_params = {"predictor_mode": "tiny_mlp",
-                  "num_layers": num_layers, "head_dim": head_dim, "hidden_dim": hidden_dim,
-                  "K": {}, "V": {}}
+    # ── Per-layer accumulators (file-major loop avoids re-reading 49 GB files) ───
+    # affine sufficient statistics
+    affine_stats: dict[tuple, AffineStats] = {
+        (l, kv): AffineStats() for l in range(num_layers) for kv in ("K", "V")
+    }
+    # per-layer rel-l2 lists: identity, affine
+    id_train_rl2:     dict[tuple, list] = {(l, kv): [] for l in range(num_layers) for kv in ("K", "V")}
+    id_heldout_rl2:   dict[tuple, list] = {(l, kv): [] for l in range(num_layers) for kv in ("K", "V")}
+    af_train_rl2:     dict[tuple, list] = {(l, kv): [] for l in range(num_layers) for kv in ("K", "V")}
+    af_heldout_rl2:   dict[tuple, list] = {(l, kv): [] for l in range(num_layers) for kv in ("K", "V")}
+    af_ph_num:        dict[tuple, Optional[torch.Tensor]] = {(l, kv): None for l in range(num_layers) for kv in ("K", "V")}
+    af_ph_den:        dict[tuple, Optional[torch.Tensor]] = {(l, kv): None for l in range(num_layers) for kv in ("K", "V")}
 
-    # ── Per-layer result table ───────────────────────────────────────
-    rows = []   # (layer, kv, predictor, train_stats, held_stats)
-    per_head_rows = []  # (layer, kv, per_head_rl2_tensor)
+    # ── Pass 1: fit affine on train dumps ──────────────────────────────
+    print("=== Pass 1: Accumulating affine statistics (train) ===")
+    for fi, path in enumerate(train_dumps):
+        t0 = time.time()
+        print(f"  Loading train[{fi}]: {os.path.basename(path)} ...", flush=True)
+        layers_kv = _load_dump_all_layers(path)
+        for l_idx, (k, v) in enumerate(layers_kv):
+            for kv_key, x in (("K", k), ("V", v)):
+                x_dev = x.to(device)
+                for x_prev, x_curr in iter_chunk_pairs(x_dev, stride):
+                    affine_stats[(l_idx, kv_key)].update(x_prev, x_curr)
+                del x_dev
+        del layers_kv
+        gc.collect()
+        print(f"  done in {time.time()-t0:.1f}s", flush=True)
+
+    # Solve affine params for all layers
+    print("\nSolving affine params ...", flush=True)
+    alpha_all: dict[tuple, torch.Tensor] = {}
+    beta_all: dict[tuple, torch.Tensor] = {}
+    for l in range(num_layers):
+        for kv in ("K", "V"):
+            a, b = affine_stats[(l, kv)].solve()
+            alpha_all[(l, kv)] = a.to(device)
+            beta_all[(l, kv)] = b.to(device)
+
+    # ── Pass 2: evaluate identity + affine on train dumps ─────────────
+    print("\n=== Pass 2: Evaluating identity + affine on train dumps ===")
+    for fi, path in enumerate(train_dumps):
+        t0 = time.time()
+        print(f"  Loading train[{fi}]: {os.path.basename(path)} ...", flush=True)
+        layers_kv = _load_dump_all_layers(path)
+        for l_idx, (k, v) in enumerate(layers_kv):
+            for kv_key, x in (("K", k), ("V", v)):
+                x_dev = x.to(device)
+                alpha = alpha_all[(l_idx, kv_key)]
+                beta = beta_all[(l_idx, kv_key)]
+                for x_prev, x_curr in iter_chunk_pairs(x_dev, stride):
+                    # identity
+                    id_train_rl2[(l_idx, kv_key)].append(rel_l2(x_curr - x_prev, x_curr))
+                    # affine
+                    pred = alpha.unsqueeze(0).unsqueeze(2) * x_prev + beta.unsqueeze(0).unsqueeze(2)
+                    af_train_rl2[(l_idx, kv_key)].append(rel_l2(x_curr - pred, x_curr))
+                del x_dev
+        del layers_kv
+        gc.collect()
+        print(f"  done in {time.time()-t0:.1f}s", flush=True)
+
+    # ── Pass 3: evaluate identity + affine on heldout dumps ───────────
+    print("\n=== Pass 3: Evaluating identity + affine on heldout dumps ===")
+    for fi, path in enumerate(heldout_dumps):
+        t0 = time.time()
+        print(f"  Loading heldout[{fi}]: {os.path.basename(path)} ...", flush=True)
+        layers_kv = _load_dump_all_layers(path)
+        for l_idx, (k, v) in enumerate(layers_kv):
+            for kv_key, x in (("K", k), ("V", v)):
+                x_dev = x.to(device)
+                alpha = alpha_all[(l_idx, kv_key)]
+                beta = beta_all[(l_idx, kv_key)]
+                H = x_dev.shape[1]
+                for x_prev, x_curr in iter_chunk_pairs(x_dev, stride):
+                    # identity
+                    id_heldout_rl2[(l_idx, kv_key)].append(rel_l2(x_curr - x_prev, x_curr))
+                    # affine
+                    pred = alpha.unsqueeze(0).unsqueeze(2) * x_prev + beta.unsqueeze(0).unsqueeze(2)
+                    af_heldout_rl2[(l_idx, kv_key)].append(rel_l2(x_curr - pred, x_curr))
+                    # per-head affine rel-l2 accumulation
+                    r = x_curr - pred
+                    ph_num = r.reshape(r.shape[0], H, -1).norm(dim=-1).sum(dim=0)
+                    ph_den = x_curr.reshape(x_curr.shape[0], H, -1).norm(dim=-1).sum(dim=0)
+                    if af_ph_num[(l_idx, kv_key)] is None:
+                        af_ph_num[(l_idx, kv_key)] = ph_num
+                        af_ph_den[(l_idx, kv_key)] = ph_den
+                    else:
+                        af_ph_num[(l_idx, kv_key)] = af_ph_num[(l_idx, kv_key)] + ph_num
+                        af_ph_den[(l_idx, kv_key)] = af_ph_den[(l_idx, kv_key)] + ph_den
+                del x_dev
+        del layers_kv
+        gc.collect()
+        print(f"  done in {time.time()-t0:.1f}s", flush=True)
+
+    # ── MLP training (file-major, all layers simultaneously) ──────────
+    mlp_train_rl2:   dict[tuple, list] = {}
+    mlp_heldout_rl2: dict[tuple, list] = {}
+    mlp_params_out: dict[tuple, dict] = {}
+
+    if not args.skip_mlp:
+        print("\n=== Pass 4: Training tiny_mlp (all layers, file-major) ===")
+        mlps = {(l, kv): TinyMLP(head_dim, hidden_dim).to(device)
+                for l in range(num_layers) for kv in ("K", "V")}
+        optims = {k: torch.optim.Adam(v.parameters(), lr=args.mlp_lr)
+                  for k, v in mlps.items()}
+        best_heldout = {k: float("inf") for k in mlps}
+        best_state = {k: copy.deepcopy(v.state_dict()) for k, v in mlps.items()}
+        patience_ctr = {k: 0 for k in mlps}
+        active = set(mlps.keys())  # keys still training
+
+        for epoch in range(args.mlp_epochs):
+            if not active:
+                break
+            # ─ train pass
+            for fi, path in enumerate(train_dumps):
+                if not active:
+                    break
+                layers_kv = _load_dump_all_layers(path)
+                for l_idx, (k, v) in enumerate(layers_kv):
+                    for kv_key, x in (("K", k), ("V", v)):
+                        key = (l_idx, kv_key)
+                        if key not in active:
+                            continue
+                        x_dev = x.to(device)
+                        D = x_dev.shape[-1]
+                        mlps[key].train()
+                        for x_prev, x_curr in iter_chunk_pairs(x_dev, stride):
+                            B, H, S, _ = x_prev.shape
+                            fp = x_prev.reshape(-1, D)
+                            fc = x_curr.reshape(-1, D)
+                            perm = torch.randperm(fp.shape[0], device=device)
+                            for i in range(0, fp.shape[0], args.mlp_batch_size):
+                                idx = perm[i:i+args.mlp_batch_size]
+                                loss = F.mse_loss(mlps[key](fp[idx]), fc[idx])
+                                optims[key].zero_grad(set_to_none=True)
+                                loss.backward()
+                                optims[key].step()
+                        del x_dev
+                del layers_kv
+                gc.collect()
+
+            # ─ heldout evaluation pass
+            h_numer = {k: 0.0 for k in active}
+            h_denom = {k: 0.0 for k in active}
+            for fi, path in enumerate(heldout_dumps):
+                layers_kv = _load_dump_all_layers(path)
+                for l_idx, (k, v) in enumerate(layers_kv):
+                    for kv_key, x in (("K", k), ("V", v)):
+                        key = (l_idx, kv_key)
+                        if key not in active:
+                            continue
+                        x_dev = x.to(device)
+                        D = x_dev.shape[-1]
+                        mlps[key].eval()
+                        with torch.no_grad():
+                            for x_prev, x_curr in iter_chunk_pairs(x_dev, stride):
+                                B, H, S, _ = x_prev.shape
+                                pred = mlps[key](x_prev.reshape(-1, D)).reshape(B, H, S, D)
+                                r = x_curr - pred
+                                h_numer[key] += r.norm().item() ** 2
+                                h_denom[key] += x_curr.norm().item() ** 2
+                        del x_dev
+                del layers_kv
+                gc.collect()
+
+            # ─ early stopping check
+            newly_stopped = set()
+            for key in list(active):
+                h_rl2 = math.sqrt(h_numer[key] / max(h_denom[key], 1e-8))
+                if args.verbose_mlp:
+                    print(f"  [L{key[0]:02d} {key[1]} ep{epoch+1:02d}] held_rl2={h_rl2:.4f}", flush=True)
+                if h_rl2 < best_heldout[key] - 1e-5:
+                    best_heldout[key] = h_rl2
+                    best_state[key] = copy.deepcopy(mlps[key].state_dict())
+                    patience_ctr[key] = 0
+                else:
+                    patience_ctr[key] += 1
+                    if patience_ctr[key] >= args.mlp_patience:
+                        newly_stopped.add(key)
+            active -= newly_stopped
+            if newly_stopped and args.verbose_mlp:
+                print(f"  Epoch {epoch+1}: {len(newly_stopped)} MLPs converged, "
+                      f"{len(active)} still active", flush=True)
+
+        # Restore best states
+        for key, mlp in mlps.items():
+            mlp.load_state_dict(best_state[key])
+
+        # ─ MLP eval pass (train)
+        print("\n=== Pass 5: Evaluating tiny_mlp on train dumps ===")
+        for fi, path in enumerate(train_dumps):
+            layers_kv = _load_dump_all_layers(path)
+            for l_idx, (k, v) in enumerate(layers_kv):
+                for kv_key, x in (("K", k), ("V", v)):
+                    key = (l_idx, kv_key)
+                    x_dev = x.to(device)
+                    D = x_dev.shape[-1]
+                    mlps[key].eval()
+                    with torch.no_grad():
+                        for x_prev, x_curr in iter_chunk_pairs(x_dev, stride):
+                            B, H, S, _ = x_prev.shape
+                            pred = mlps[key](x_prev.reshape(-1, D)).reshape(B, H, S, D)
+                            r = x_curr - pred
+                            if key not in mlp_train_rl2:
+                                mlp_train_rl2[key] = []
+                            mlp_train_rl2[key].append(rel_l2(r, x_curr))
+                    del x_dev
+            del layers_kv
+            gc.collect()
+
+        # ─ MLP eval pass (heldout)
+        print("\n=== Pass 6: Evaluating tiny_mlp on heldout dumps ===")
+        for fi, path in enumerate(heldout_dumps):
+            layers_kv = _load_dump_all_layers(path)
+            for l_idx, (k, v) in enumerate(layers_kv):
+                for kv_key, x in (("K", k), ("V", v)):
+                    key = (l_idx, kv_key)
+                    x_dev = x.to(device)
+                    D = x_dev.shape[-1]
+                    mlps[key].eval()
+                    with torch.no_grad():
+                        for x_prev, x_curr in iter_chunk_pairs(x_dev, stride):
+                            B, H, S, _ = x_prev.shape
+                            pred = mlps[key](x_prev.reshape(-1, D)).reshape(B, H, S, D)
+                            r = x_curr - pred
+                            if key not in mlp_heldout_rl2:
+                                mlp_heldout_rl2[key] = []
+                            mlp_heldout_rl2[key].append(rel_l2(r, x_curr))
+                    del x_dev
+            del layers_kv
+            gc.collect()
+
+        # ─ Export MLP params
+        for key, mlp in mlps.items():
+            mlp_params_out[key] = mlp.to_param_dict()
+
+    # ── Assemble result rows ──────────────────────────────────────────
+    rows = []
+    per_head_rows = []
 
     header = ("Layer | KV | Pred         | "
               "Train (mean/std/p95/max)                  | "
               "Held (mean/std/p95/max)")
+    print()
     print(header)
     print("-" * len(header))
 
+    affine_params_out = {"predictor_mode": "affine_channel",
+                         "num_layers": num_layers, "num_heads": num_heads, "head_dim": head_dim,
+                         "K": {}, "V": {}}
+    mlp_params_dict   = {"predictor_mode": "tiny_mlp",
+                         "num_layers": num_layers, "head_dim": head_dim, "hidden_dim": hidden_dim,
+                         "K": {}, "V": {}}
+
     for l_idx in range(num_layers):
-        t0 = time.time()
         for kv_key in ("K", "V"):
-            # ── Identity ────────────────────────────────────────────
-            tr_id = eval_identity(train_dumps, l_idx, kv_key, stride, device)
-            he_id = eval_identity(heldout_dumps, l_idx, kv_key, stride, device)
+            key = (l_idx, kv_key)
+
+            tr_id = _aggregate_stats(id_train_rl2[key])
+            he_id = _aggregate_stats(id_heldout_rl2[key])
             rows.append((l_idx, kv_key, "identity", tr_id, he_id))
             print(f"  {l_idx:2d}  | {kv_key} | identity      | "
                   f"{_fmt_stats(tr_id)} | {_fmt_stats(he_id)}")
 
-            # ── Affine ───────────────────────────────────────────────
-            alpha, beta = fit_affine_layer(train_dumps, l_idx, kv_key, stride, device)
-            tr_af = eval_affine(train_dumps, l_idx, kv_key, alpha, beta, stride, device)
-            he_af = eval_affine(heldout_dumps, l_idx, kv_key, alpha, beta, stride, device)
+            alpha = alpha_all[key].cpu()
+            beta  = beta_all[key].cpu()
+            affine_params_out[kv_key][l_idx] = {"alpha": alpha, "beta": beta}
+
+            tr_af = _aggregate_stats(af_train_rl2[key])
+            he_af = _aggregate_stats(af_heldout_rl2[key])
             rows.append((l_idx, kv_key, "affine_channel", tr_af, he_af))
             print(f"  {l_idx:2d}  | {kv_key} | affine_channel | "
                   f"{_fmt_stats(tr_af)} | {_fmt_stats(he_af)}")
-            affine_params[kv_key][l_idx] = {
-                "alpha": alpha.cpu(), "beta": beta.cpu()
-            }
 
-            # Per-head profile for affine (on held-out)
-            ph = eval_affine_per_head(heldout_dumps, l_idx, kv_key, alpha, beta, stride, device)
-            per_head_rows.append((l_idx, kv_key, "affine_channel", ph.cpu()))
+            if af_ph_num[key] is not None:
+                ph = (af_ph_num[key] / af_ph_den[key].clamp_min(1e-8)).cpu()
+            else:
+                ph = torch.zeros(num_heads)
+            per_head_rows.append((l_idx, kv_key, "affine_channel", ph))
 
-            # ── Tiny MLP ─────────────────────────────────────────────
             if not args.skip_mlp:
-                mlp = train_mlp_layer(
-                    train_dumps, heldout_dumps, l_idx, kv_key,
-                    head_dim, hidden_dim, stride, device,
-                    args.mlp_epochs, args.mlp_lr, args.mlp_batch_size, args.mlp_patience,
-                    verbose=args.verbose_mlp,
-                )
-                tr_ml = eval_mlp(train_dumps, l_idx, kv_key, mlp, stride, device)
-                he_ml = eval_mlp(heldout_dumps, l_idx, kv_key, mlp, stride, device)
+                tr_ml = _aggregate_stats(mlp_train_rl2.get(key, []))
+                he_ml = _aggregate_stats(mlp_heldout_rl2.get(key, []))
                 rows.append((l_idx, kv_key, "tiny_mlp", tr_ml, he_ml))
                 print(f"  {l_idx:2d}  | {kv_key} | tiny_mlp      | "
                       f"{_fmt_stats(tr_ml)} | {_fmt_stats(he_ml)}")
-                mlp_params[kv_key][l_idx] = mlp.to_param_dict()
-                del mlp
-
-        print(f"  Layer {l_idx} done in {time.time() - t0:.1f}s")
-        print()
+                mlp_params_dict[kv_key][l_idx] = mlp_params_out[key]
 
     # ── Save fitted params ───────────────────────────────────────────
     affine_path = os.path.join(args.output_dir, "affine_channel_self_forcing_dmd.pt")
-    torch.save(affine_params, affine_path)
-    print(f"Saved affine params → {affine_path}")
+    torch.save(affine_params_out, affine_path)
+    print(f"\nSaved affine params → {affine_path}")
 
     if not args.skip_mlp:
         mlp_path = os.path.join(args.output_dir, "tiny_mlp_self_forcing_dmd.pt")
-        torch.save(mlp_params, mlp_path)
+        torch.save(mlp_params_dict, mlp_path)
         print(f"Saved tiny_mlp params → {mlp_path}")
 
     # ── Aggregate summary ────────────────────────────────────────────

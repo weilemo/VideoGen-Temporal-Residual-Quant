@@ -509,6 +509,33 @@ class CausalInferencePipeline(torch.nn.Module):
         if return_latents and not decode_video:
             return None, output
 
+        # ----------------------------------------------------------
+        # Optional: dump KV / CrossAttn cache for analysis (before VAE
+        # decode so OOM during decode doesn't prevent saving)
+        # ----------------------------------------------------------
+        if self.dump_kv_level >= 1:
+            if (not torch.distributed.is_initialized()) or torch.distributed.get_rank() == 0:
+                dump_dir = os.path.join(os.getenv("KV_DUMP_DIR", "kv_dumps"))
+                os.makedirs(dump_dir, exist_ok=True)
+                existing = len([f for f in os.listdir(dump_dir) if f.endswith(".pt")])
+                filename = f"kv_cache_frames{num_output_frames}_{existing:04d}.pt"
+                torch.save({
+                    "kv_cache": self.kv_cache1,
+                    "crossattn_cache": getattr(self, "crossattn_cache", None),
+                }, os.path.join(dump_dir, filename))
+                print(f"KV cache dumped to {os.path.join(dump_dir, filename)}")
+            # Explicitly free ChunkedKVCache GPU tensors before VAE decode
+            if self.kv_cache1 is not None:
+                for layer_cache in self.kv_cache1:
+                    for kv_obj in layer_cache.values():
+                        if hasattr(kv_obj, "chunks"):
+                            kv_obj.chunks = [None] * len(kv_obj.chunks)
+                        if hasattr(kv_obj, "quantized_spans"):
+                            kv_obj.quantized_spans.clear()
+            self.kv_cache1 = None
+            import gc; gc.collect()
+            torch.cuda.empty_cache()
+
         # Step 4: Decode the output
         video = self.vae.decode_to_pixel(output, use_cache=False)
         
@@ -529,22 +556,6 @@ class CausalInferencePipeline(torch.nn.Module):
                 print(f"    - Block {i} generation time: {block_time:.2f} ms ({100 * block_time / diffusion_time:.2f}% of diffusion)")
             print(f"  - VAE decoding time: {vae_time:.2f} ms ({100 * vae_time / total_time:.2f}%)")
             print(f"  - Total time: {total_time:.2f} ms")
-
-        # ----------------------------------------------------------
-        # Optional: dump KV / CrossAttn cache for analysis
-        # ----------------------------------------------------------
-        if self.dump_kv_level >= 1:
-            # Only rank-0 process dumps to avoid duplicates in DDP
-            if (not torch.distributed.is_initialized()) or torch.distributed.get_rank() == 0:
-                dump_dir = os.path.join(os.getenv("KV_DUMP_DIR", "kv_dumps"))
-                os.makedirs(dump_dir, exist_ok=True)
-                # Compose filename with prompt hash & frames
-                filename = f"kv_cache_frames{num_output_frames}.pt"
-                torch.save({
-                    "kv_cache": self.kv_cache1,
-                    "crossattn_cache": getattr(self, "crossattn_cache", None),
-                }, os.path.join(dump_dir, filename))
-                print(f"KV cache dumped to {os.path.join(dump_dir, filename)}")
 
         if return_latents:
             return video, output
