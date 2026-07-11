@@ -13,7 +13,7 @@ from utils.misc import set_seed
 
 from demo_utils.memory import gpu, get_cuda_free_memory_gb
 
-from hwq.head_importance import build_topk_policy_from_focused_forcing, write_topk_policy
+from trq.head_importance import build_topk_policy_from_focused_forcing, write_topk_policy
 
 
 parser = argparse.ArgumentParser(

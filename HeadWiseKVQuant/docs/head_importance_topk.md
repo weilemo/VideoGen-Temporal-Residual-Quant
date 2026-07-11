@@ -96,7 +96,7 @@ HEAD_IMPORTANCE_PATH=assets/head_importance/top4_dmd_loss.json \
 
 If you already have JSON files from a separate focused-forcing run, collect
 them into one top-k policy.  The selection logic lives in the library module
-`hwq.head_importance`; the script below is a thin CLI wrapper:
+`trq.head_importance`; the script below is a thin CLI wrapper:
 
 ```bash
 cd /data2/moweile-20251213/workspace/videoquant/HeadWiseKVQuant
@@ -112,7 +112,7 @@ python scripts/aggregate_head_importance.py \
 Python API:
 
 ```python
-from hwq.head_importance import build_topk_policy_from_focused_forcing, write_topk_policy
+from trq.head_importance import build_topk_policy_from_focused_forcing, write_topk_policy
 
 policy = build_topk_policy_from_focused_forcing(
     "/path/to/focusedforcing_dm_loss_outputs",

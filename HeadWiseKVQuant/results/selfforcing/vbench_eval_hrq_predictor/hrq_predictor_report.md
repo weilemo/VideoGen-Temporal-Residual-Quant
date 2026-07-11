@@ -1,5 +1,9 @@
 # HRQ 预测器实验报告
 
+> **归档的 pre-TRQ 结果。** 本报告中的 affine 实验生成于 predictor 参数写入
+> packed state 之前，旧解码器实际按 identity predictor 重建，不能作为 affine
+> 收益证据。请用 TRQ v1 重新运行；identity 结果仍可作为历史基线。
+
 **分支：** `feature/hwq-residual-quant`
 **开始日期：** 2026-05-28
 **更新日期：** 2026-06-04
@@ -52,8 +56,8 @@
 
 ## 第二、三阶段：已拟合参数文件
 
-- **Affine 参数：** `assets/hrq_predictors/affine_channel_self_forcing_dmd.pt` ✓ 已保存（756 KB）
-- **Tiny MLP 参数：** `assets/hrq_predictors/tiny_mlp_self_forcing_dmd.pt` — **未生成**（提升 < 10%，按决策框架跳过）
+- **Affine 参数：** 已迁移至 `assets/trq_predictors/affine_channel_self_forcing_dmd.pt`（756 KB）
+- **Tiny MLP 参数：** `assets/trq_predictors/tiny_mlp_self_forcing_dmd.pt` — **未生成**（提升 < 10%，按决策框架跳过）
 
 > 由 `analyze_hrq_predictor.py --skip_mlp` 生成。
 

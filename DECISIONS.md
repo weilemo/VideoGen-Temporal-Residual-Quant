@@ -44,7 +44,7 @@
 
 - 决策：从 `Quant-VideoGen` 中抽出 KV cache 低精度量化框架，建立独立代码库 `/mnt/workspace/caipeiliang/code/moweile/videoquant-main/HeadWiseKVQuant`。
 - 原因：后续论文方法不应长期绑在 QVG 实验仓里；独立库更适合作为 `head-wise quant` 方法主体，便于模块化、复现实验和后续开源整理。
-- 影响：后续方法开发优先发生在 `HeadWiseKVQuant/src/hwq/`；`Quant-VideoGen` 的 `Self-Forcing` 代码应逐步退化为下游调用方，只负责推理调度和实验输出。
+- 影响：后续方法开发优先发生在当前统一目录 `HeadWiseKVQuant/src/trq/`（原 `src/hwq/`）；`Quant-VideoGen` 的 `Self-Forcing` 代码应逐步退化为下游调用方，只负责推理调度和实验输出。
 
 ## D-2026-05-08-08 `Quant-VideoGen` 作为下游集成入口调用 `hwq`
 
@@ -91,7 +91,7 @@
   - 首选 JSON，支持 `top_heads_by_layer` / `scores_by_layer` / `scores` / `global_scores`
   - 也支持 CSV/TXT：`global_head_id,score` 或 `layer,head,score`
 - 影响：运行时通过 `HEADWISE_MODE=topk` 和 `HEAD_IMPORTANCE_PATH` 启用；从 focused-forcing DMD loss JSON 生成 policy 时使用 `HeadWiseKVQuant/scripts/aggregate_head_importance.py`。
-- 进一步约定：选头逻辑属于方法库本身，放在 `HeadWiseKVQuant/src/hwq/head_importance.py`；`scripts/aggregate_head_importance.py` 只是 CLI wrapper，避免选头逻辑散落在实验脚本中。
+- 进一步约定：选头逻辑属于方法库本身，当前路径为 `HeadWiseKVQuant/src/trq/head_importance.py`；`scripts/aggregate_head_importance.py` 只是 CLI wrapper，避免选头逻辑散落在实验脚本中。
 - 进一步约定：head ablation / DMD-loss calibration 也属于 `HeadWiseKVQuant` 的 vendored Self-Forcing backend；外部 `focused-forcing-code` 只作为算法参考，不作为运行时依赖。
 
 ## D-2026-05-17-13 VBench 评估确认 6 条实验线的量化质量排序

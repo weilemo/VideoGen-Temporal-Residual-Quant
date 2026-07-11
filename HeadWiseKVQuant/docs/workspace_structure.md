@@ -1,27 +1,21 @@
 # Workspace Structure
 
-`HeadWiseKVQuant` should be treated as the main research workspace inside each branch-specific worktree.
+`HeadWiseKVQuant` is the active method workspace inside the local
+`videoquant-trq` repository.
 
-## Repository Worktrees
-
-The parent `videoquant` checkout is now only a detached-HEAD management entrypoint. Use one sibling worktree per research direction:
+## Current Local Layout
 
 ```text
-/mnt/workspace/caipeiliang/code/moweile/
-  videoquant/          # worktree management only
-  videoquant-main/     # main
-  videoquant-prompt/   # HWQ_prompt_router
-  videoquant-online/   # hwq_online_calibration
-  videoquant-hrq/      # feature/hwq-residual-quant
+/Users/moweile/Code/LAB/
+  videoquant-trq/      # active unified repository
+  qvg/                 # junior S2++ repository, reference only
 ```
 
-Do not develop by repeatedly switching branches in `videoquant/`; enter the matching `videoquant-*` directory first.
-
 
 ```text
-videoquant/
+videoquant-trq/
 ├── HeadWiseKVQuant/
-│   ├── src/hwq/                  # paper-facing quantization method
+│   ├── src/trq/                  # paper-facing quantization method
 │   ├── backends/self_forcing/    # vendored Self-Forcing model and pipeline
 │   ├── scripts/self_forcing/     # experiment launchers
 │   ├── assets/t2v.txt            # default prompts
@@ -39,13 +33,21 @@ The split is intentional:
 - `HeadWiseKVQuant/backends/self_forcing` owns the active Self-Forcing backend used by HWQ launchers.
 - `Quant-VideoGen` is retained as original source/reference.
 - QVG's original `quant_videogen` package is kept for reference and baseline comparison.
-- New head-wise policies should be added under `HeadWiseKVQuant/src/hwq/`, not under `Quant-VideoGen/quant_videogen/`.
+- New head-wise policies should be added under `HeadWiseKVQuant/src/trq/`, not under `Quant-VideoGen/quant_videogen/`.
+- Temporal residual quantization is owned by `src/trq/real/trq.py`. Within the
+  active HWQ package, `real/hrq.py` and `real/s2pp.py` are compatibility
+  adapters only. QVG's original S2++ stays reference-only; do not develop a
+  second active codec implementation under either legacy name.
 
-Run the current smoke test from `HeadWiseKVQuant`:
+Run the CPU smoke test from `HeadWiseKVQuant` first:
 
 ```bash
-bash scripts/self_forcing/run_random_hwq.sh
+python -m pip install -e .
+python -m unittest discover -s tests -v
 ```
+
+Then follow [`getting_started.md`](getting_started.md) for Self-Forcing BF16
+and TRQ generation.
 
 Use `SELF_FORCING_CKPT_ROOT` when checkpoints are not under
 `HeadWiseKVQuant/ckpts/Self-Forcing`:

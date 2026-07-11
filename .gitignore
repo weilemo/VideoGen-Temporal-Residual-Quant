@@ -16,6 +16,8 @@ HeadWiseKVQuant/outputs/
 
 *.pt
 *.pth
+!HeadWiseKVQuant/assets/trq_predictors/
+!HeadWiseKVQuant/assets/trq_predictors/*.pt
 *.ckpt
 *.bin
 *.safetensors

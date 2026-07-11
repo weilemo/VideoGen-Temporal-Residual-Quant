@@ -1,6 +1,7 @@
 from typing import List, Optional
 import torch
 import os
+import json
 import numpy as np
 from tqdm import tqdm
 from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
@@ -10,7 +11,7 @@ from demo_utils.memory import gpu, get_cuda_free_memory_gb, DynamicSwapInstaller
 from types import SimpleNamespace
 from termcolor import cprint
 
-from hwq import (
+from trq import (
     ChunkedKVCache,
     RandomHeadPolicy,
     compress_headwise_kv_cache,
@@ -21,6 +22,7 @@ from hwq import (
     onload_kv_cache_layer,
     uncompress_kv_cache,
 )
+from trq.analysis.kv_dump import parse_layer_spec
 
 class CausalInferencePipeline(torch.nn.Module):
     def __init__(
@@ -410,6 +412,7 @@ class CausalInferencePipeline(torch.nn.Module):
         all_num_frames = [self.num_frame_per_block] * num_blocks
         if self.independent_first_frame and initial_latent is None:
             all_num_frames = [1] + all_num_frames
+        quantization_chunk_interval = 8
         for chunk_index, current_num_frames in enumerate(tqdm(all_num_frames)):
             if profile:
                 block_start.record()
@@ -422,8 +425,10 @@ class CausalInferencePipeline(torch.nn.Module):
             #########################################################
             # When generating the first 8 chunks, we do not quantize them.
 
-            QUANT_FACTOR = 8
-            if chunk_index < QUANT_FACTOR or chunk_index % QUANT_FACTOR != 0:
+            if (
+                chunk_index < quantization_chunk_interval
+                or chunk_index % quantization_chunk_interval != 0
+            ):
                 pass
             else:
                 max_tokens_to_quantize = self.kv_cache1[0]["local_end_index"].item()
@@ -432,7 +437,10 @@ class CausalInferencePipeline(torch.nn.Module):
                 # assert tokens_to_quantize == np.sum(all_num_frames[:chunk_index]) * self.frame_seq_length
                 
                 # Only quantize the previous chunks
-                tokens_to_quantize_start = int(np.sum(all_num_frames[:chunk_index - QUANT_FACTOR]) * self.frame_seq_length)
+                tokens_to_quantize_start = int(
+                    np.sum(all_num_frames[:chunk_index - quantization_chunk_interval])
+                    * self.frame_seq_length
+                )
                 tokens_to_quantize_end = int(np.sum(all_num_frames[:chunk_index]) * self.frame_seq_length)
             
                 self.quantize_kv_cache(tokens_to_quantize_start, tokens_to_quantize_end, max_tokens_to_quantize)
@@ -517,13 +525,84 @@ class CausalInferencePipeline(torch.nn.Module):
             if (not torch.distributed.is_initialized()) or torch.distributed.get_rank() == 0:
                 dump_dir = os.path.join(os.getenv("KV_DUMP_DIR", "kv_dumps"))
                 os.makedirs(dump_dir, exist_ok=True)
-                existing = len([f for f in os.listdir(dump_dir) if f.endswith(".pt")])
-                filename = f"kv_cache_frames{num_output_frames}_{existing:04d}.pt"
-                torch.save({
-                    "kv_cache": self.kv_cache1,
-                    "crossattn_cache": getattr(self, "crossattn_cache", None),
-                }, os.path.join(dump_dir, filename))
-                print(f"KV cache dumped to {os.path.join(dump_dir, filename)}")
+                dump_format = os.getenv("KV_DUMP_FORMAT", "chunked")
+                metadata = {
+                    "format": "hwq_chunked_kv_dump",
+                    "version": 1,
+                    "text_prompts": list(text_prompts),
+                    "num_output_frames": int(num_output_frames),
+                    "frame_seq_length": int(self.frame_seq_length),
+                    "num_frame_per_block": int(self.num_frame_per_block),
+                    "independent_first_frame": bool(self.independent_first_frame),
+                    "generation_chunk_frame_counts": [int(value) for value in all_num_frames],
+                    "quantization_chunk_interval": int(quantization_chunk_interval),
+                    "local_attn_size": int(self.local_attn_size),
+                    "quant_type": str(getattr(self.quant_config, "quant_type", "none")),
+                    "kv_layout": "BSHD",
+                    "key_position": "pre_rope",
+                }
+                scheduled_spans = []
+                for boundary in range(
+                    quantization_chunk_interval,
+                    len(all_num_frames),
+                    quantization_chunk_interval,
+                ):
+                    start_chunk = boundary - quantization_chunk_interval
+                    scheduled_spans.append({
+                        "start_frame": int(sum(all_num_frames[:start_chunk])),
+                        "end_frame": int(sum(all_num_frames[:boundary])),
+                    })
+                metadata["scheduled_trq_frame_spans"] = scheduled_spans
+                metadata["scheduled_unquantized_tail_start_frame"] = (
+                    scheduled_spans[-1]["end_frame"] if scheduled_spans else 0
+                )
+                if dump_format == "layer_shards":
+                    existing = len([f for f in os.listdir(dump_dir) if f.endswith("_manifest.json")])
+                    sample_id = f"kv_cache_frames{num_output_frames}_{existing:04d}"
+                    metadata["sample_id"] = sample_id
+                    selected_layers = parse_layer_spec(
+                        os.getenv("KV_DUMP_LAYERS", "all"), len(self.kv_cache1)
+                    )
+                    shard_files = []
+                    for layer_idx in selected_layers:
+                        layer = self.kv_cache1[layer_idx]
+                        total_tokens = int(layer["local_end_index"].item())
+                        if total_tokens <= 0:
+                            raise ValueError(f"Cannot dump empty KV cache at layer {layer_idx}")
+                        k = layer["k"].read(0, total_tokens).permute(0, 2, 1, 3).cpu().contiguous()
+                        v = layer["v"].read(0, total_tokens).permute(0, 2, 1, 3).cpu().contiguous()
+                        filename = f"{sample_id}_layer{layer_idx:02d}.pt"
+                        torch.save({
+                            "format": "hwq_kv_tensors",
+                            "version": 1,
+                            "layers": {layer_idx: {"k": k, "v": v}},
+                            "metadata": metadata,
+                        }, os.path.join(dump_dir, filename))
+                        shard_files.append(filename)
+                        del k, v
+                    manifest_path = os.path.join(dump_dir, f"{sample_id}_manifest.json")
+                    with open(manifest_path, "w", encoding="utf-8") as handle:
+                        json.dump({
+                            "format": "hwq_kv_layer_shards",
+                            "version": 1,
+                            "metadata": metadata,
+                            "layers": selected_layers,
+                            "files": shard_files,
+                        }, handle, indent=2)
+                    print(f"KV cache layer shards dumped to {dump_dir} ({len(shard_files)} layers)")
+                elif dump_format == "chunked":
+                    existing = len([f for f in os.listdir(dump_dir) if f.endswith(".pt")])
+                    filename = f"kv_cache_frames{num_output_frames}_{existing:04d}.pt"
+                    torch.save({
+                        "kv_cache": self.kv_cache1,
+                        "crossattn_cache": getattr(self, "crossattn_cache", None),
+                        "metadata": metadata,
+                    }, os.path.join(dump_dir, filename))
+                    print(f"KV cache dumped to {os.path.join(dump_dir, filename)}")
+                else:
+                    raise ValueError(
+                        f"KV_DUMP_FORMAT must be chunked or layer_shards, got {dump_format!r}"
+                    )
             # Explicitly free ChunkedKVCache GPU tensors before VAE decode
             if self.kv_cache1 is not None:
                 for layer_cache in self.kv_cache1:

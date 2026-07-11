@@ -1,85 +1,0 @@
-[rank0]:[W507 13:38:56.108878768 ProcessGroupNCCL.cpp:4561] [PG ID 0 PG GUID 0 Rank 0]  using GPU 0 to perform barrier as devices used by this process are currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. Specify device_ids in barrier() to force use of a particular device, or call init_process_group() with a device_id.
-0it [00:00, ?it/s]
-  0%|          | 0/60 [00:00<?, ?it/s][A
-  2%|▏         | 1/60 [00:01<01:23,  1.41s/it][A
-  3%|▎         | 2/60 [00:02<01:07,  1.16s/it][A
-  5%|▌         | 3/60 [00:03<01:04,  1.14s/it][A
-  7%|▋         | 4/60 [00:04<01:06,  1.18s/it][A
-  8%|▊         | 5/60 [00:06<01:09,  1.26s/it][A
- 10%|█         | 6/60 [00:07<01:13,  1.36s/it][A
- 12%|█▏        | 7/60 [00:09<01:18,  1.48s/it][A
- 13%|█▎        | 8/60 [00:11<01:23,  1.61s/it][A 13%|█▎        | 8/60 [00:13<01:25,  1.64s/it]
-0it [00:14, ?it/s]
-[rank0]: Traceback (most recent call last):
-[rank0]:   File "/mnt/users/moweile-20251213/workspace/videoquant/Quant-VideoGen/experiments/Self-Forcing/inference.py", line 198, in <module>
-[rank0]:     video, latents = pipeline.inference(
-[rank0]:   File "/mnt/users/moweile-20251213/workspace/videoquant/Quant-VideoGen/experiments/Self-Forcing/pipeline/causal_inference.py", line 354, in inference
-[rank0]:     self.quantize_kv_cache(tokens_to_quantize_start, tokens_to_quantize_end, max_tokens_to_quantize)
-[rank0]:   File "/mnt/users/moweile-20251213/workspace/videoquant/Quant-VideoGen/experiments/Self-Forcing/pipeline/causal_inference.py", line 106, in quantize_kv_cache
-[rank0]:     k_quant, v_quant = compress_kv_cache(
-[rank0]:   File "/mnt/users/moweile-20251213/workspace/videoquant/Quant-VideoGen/quant_videogen/compress.py", line 225, in compress_kv_cache
-[rank0]:     k_quant = triton_prq_quantize_tensor(
-[rank0]:   File "/mnt/users/moweile-20251213/workspace/videoquant/Quant-VideoGen/quant_videogen/functions.py", line 316, in triton_prq_quantize_tensor
-[rank0]:     centroids_list, cluster_ids_list, residual_quant, scales = prq_quant(
-[rank0]:   File "/mnt/users/moweile-20251213/workspace/videoquant/Quant-VideoGen/quant_videogen/real/prq.py", line 63, in prq_quant
-[rank0]:     cluster_ids, centroids, cluster_sizes, iters = batch_kmeans_Euclid(
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/contextlib.py", line 79, in inner
-[rank0]:     return func(*args, **kwds)
-[rank0]:   File "/mnt/users/moweile-20251213/workspace/videoquant/Quant-VideoGen/quant_videogen/kmeans/kmeans_euclid.py", line 69, in batch_kmeans_Euclid
-[rank0]:     centroids_new, cluster_ids, cluster_sizes = _euclid_iter(x, x_sq, centroids)
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/contextlib.py", line 79, in inner
-[rank0]:     return func(*args, **kwds)
-[rank0]:   File "/mnt/users/moweile-20251213/workspace/videoquant/Quant-VideoGen/quant_videogen/kmeans/kmeans_euclid.py", line 15, in _euclid_iter
-[rank0]:     cluster_ids = euclid_assign_triton(x, centroids, x_sq)
-[rank0]:   File "/mnt/users/moweile-20251213/workspace/videoquant/Quant-VideoGen/quant_videogen/kmeans/euclid_assign.py", line 197, in euclid_assign_triton
-[rank0]:     _euclid_assign_kernel[grid](
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/triton/runtime/jit.py", line 330, in <lambda>
-[rank0]:     return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 186, in run
-[rank0]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 186, in <dictcomp>
-[rank0]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 166, in _bench
-[rank0]:     return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/triton/testing.py", line 117, in do_bench
-[rank0]:     fn()
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 152, in kernel_call
-[rank0]:     self.fn.run(
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/triton/runtime/jit.py", line 653, in run
-[rank0]:     kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/triton/compiler/compiler.py", line 395, in __getattribute__
-[rank0]:     self._init_handles()
-[rank0]:   File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/triton/compiler/compiler.py", line 390, in _init_handles
-[rank0]:     self.module, self.function, self.n_regs, self.n_spills = driver.active.utils.load_binary(
-[rank0]: SystemError: PY_SSIZE_T_CLEAN macro must be defined for '#' formats
-[rank0]:[W507 13:39:12.157372500 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-E0507 13:39:15.417000 252777 site-packages/torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 253052) of binary: /mnt/users/moweile-20251213/conda/envs/self-forcing/bin/python
-Traceback (most recent call last):
-  File "/mnt/users/moweile-20251213/conda/envs/self-forcing/bin/torchrun", line 6, in <module>
-    sys.exit(main())
-  File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
-    return f(*args, **kwargs)
-  File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
-    run(args)
-  File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
-    elastic_launch(
-  File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
-    return launch_agent(self._config, self._entrypoint, list(args))
-  File "/mnt/users/moweile-20251213/conda/envs/self-forcing/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
-    raise ChildFailedError(
-torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
-============================================================
-experiments/Self-Forcing/inference.py FAILED
-------------------------------------------------------------
-Failures:
-  <NO_OTHER_FAILURES>
-------------------------------------------------------------
-Root Cause (first observed failure):
-[0]:
-  time      : 2026-05-07_13:39:15
-  host      : lyg0236
-  rank      : 0 (local_rank: 0)
-  exitcode  : 1 (pid: 253052)
-  error_file: <N/A>
-  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
-============================================================

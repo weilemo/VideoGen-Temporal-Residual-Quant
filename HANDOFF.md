@@ -1,24 +1,22 @@
 # 快速交接
 
-## 先选 worktree
-
-不要在原目录 `/mnt/workspace/caipeiliang/code/moweile/videoquant` 里开发或切长期分支；它现在是 detached HEAD 管理入口。先按任务进入对应目录：
+## 当前入口
 
 ```bash
-cd /mnt/workspace/caipeiliang/code/moweile/videoquant-main     # main / 文档与稳定基线
-cd /mnt/workspace/caipeiliang/code/moweile/videoquant-prompt   # HWQ_prompt_router
-cd /mnt/workspace/caipeiliang/code/moweile/videoquant-online   # hwq_online_calibration
-cd /mnt/workspace/caipeiliang/code/moweile/videoquant-hrq      # feature/hwq-residual-quant
+cd /Users/moweile/Code/LAB/videoquant-trq
 ```
 
-当前分支隔离状态（2026-05-23）：
+当前仓库分工（2026-07-11）：
 
-| 目录 | 分支 | 用途 |
-|---|---|---|
-| `videoquant-main` | `main` | 稳定文档与基线 |
-| `videoquant-prompt` | `HWQ_prompt_router` | Proposal 1: prompt router with multiple offline policies |
-| `videoquant-online` | `hwq_online_calibration` | Proposal 2: first-chunks online calibration |
-| `videoquant-hrq` | `feature/hwq-residual-quant` | HRQ residual quant backend |
+| 目录 | 用途 |
+|---|---|
+| `videoquant-trq/HeadWiseKVQuant` | 当前方法主库，拥有 TRQ、PRQ、head-wise policy 和 Self-Forcing adapter |
+| `videoquant-trq/Quant-VideoGen` | 原始 QVG 基线参考 |
+| `../qvg` | 学弟的 S2++ 研究仓库，只作为迁移来源与对照 |
+
+新同学先读 `HeadWiseKVQuant/README.md` 和
+`HeadWiseKVQuant/docs/getting_started.md`；TRQ v1 的统一边界见
+`HeadWiseKVQuant/docs/trq_unification.md`。
 
 ## 当前接力点
 
@@ -54,7 +52,7 @@ cd /mnt/workspace/caipeiliang/code/moweile/videoquant-hrq      # feature/hwq-res
    - `HeadWiseKVQuant/README.md`
    - `HeadWiseKVQuant/docs/self_forcing_integration.md`
    - `HeadWiseKVQuant/docs/workspace_structure.md`
-   - `HeadWiseKVQuant/src/hwq/headwise.py`
+   - `HeadWiseKVQuant/src/trq/headwise.py`
 5. **优先任务**：全矩阵比较已完成！下一步：
    - Top-K × PRQ 叠加：DMD top-4 + PRQ int4+int2，可能的 SOTA 路线
    - QVG PRQ INT2 32-prompt baseline（形成 BF16 / PRQ / Top-K 三足对照）

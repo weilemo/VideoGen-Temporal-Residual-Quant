@@ -9,9 +9,7 @@ import torch
 
 from .compress import get_quantize_type, QuantizeFunctions
 from .sim.quant.quantize_config import QuantizeConfig
-from .functions import triton_prq_dequantize_tensor
-from .packed_naive import packed_naive_dequantize_tensor
-from .real.hrq import hrq_dequantize_tensor
+from .real.trq import trq_dequantize_tensor
 
 
 ########################################################
@@ -44,6 +42,8 @@ def _dequantize_single_cache(
     num_bits = extract_num_bits(quant_config)
 
     if quantize_type in (QuantizeFunctions.TRITON_PRQ, QuantizeFunctions.TRITON_PRQ_CLIP):
+        from .functions import triton_prq_dequantize_tensor
+
         return triton_prq_dequantize_tensor(
             packed_state,
             quant_config.quant_block_size,
@@ -51,12 +51,14 @@ def _dequantize_single_cache(
             output_dtype=output_dtype,
         )
     if quantize_type == QuantizeFunctions.PACKED_NAIVE:
+        from .packed_naive import packed_naive_dequantize_tensor
+
         return packed_naive_dequantize_tensor(
             packed_state,
             output_dtype=output_dtype,
         )
-    if quantize_type == QuantizeFunctions.HRQ:
-        return hrq_dequantize_tensor(
+    if quantize_type == QuantizeFunctions.TRQ:
+        return trq_dequantize_tensor(
             packed_state,
             output_dtype=output_dtype,
         )
@@ -68,8 +70,9 @@ def uncompress_single_cache(cache: torch.Tensor | dict) -> torch.Tensor:
     if not isinstance(cache, dict):
         return cache
 
-    if cache.get("format") == "hrq":
-        return hrq_dequantize_tensor(cache, output_dtype=torch.bfloat16)
+    if cache.get("format") in {"trq", "hrq"} or cache.get("method") == "s2pp":
+        output_dtype = cache.get("info", {}).get("output_dtype", torch.bfloat16)
+        return trq_dequantize_tensor(cache, output_dtype=output_dtype)
 
     info = cache["info"]
     output_dtype = info["output_dtype"]

@@ -1,7 +1,7 @@
 # Self-Forcing Integration Notes
 
 This repository is the method workspace.  It keeps quantization policy,
-compression metadata, and decompression in `hwq`, while vendoring the
+compression metadata, and decompression in `trq`, while vendoring the
 Self-Forcing model backend under `backends/self_forcing/`.
 
 The expected layouts are:
@@ -13,9 +13,9 @@ The expected layouts are:
 The adapter helper is:
 
 ```python
-from hwq import QuantizeConfig
-from hwq.headwise import RandomHeadPolicy
-from hwq.self_forcing import compress_self_forcing_cache_span
+from trq import QuantizeConfig
+from trq.headwise import RandomHeadPolicy
+from trq.self_forcing import compress_self_forcing_cache_span
 
 policy = RandomHeadPolicy(
     num_heads=12,
@@ -66,7 +66,7 @@ The script uses the vendored backend by default:
 
 ```text
 HeadWiseKVQuant/
-├── src/hwq/
+├── src/trq/
 ├── backends/self_forcing/
 ├── scripts/self_forcing/
 └── assets/t2v.txt
@@ -109,6 +109,11 @@ packed low-bit codes plus per-block min/scale metadata and are decompressed on
 cache read.  The older `naive-int2/int4` path remains a fake-quant quality
 control because it returns BF16 tensors.
 
+TRQ is selected with `trq-int2`, `trq-int4`, or `trq-int8`. Legacy
+`hrq-*`/`s2pp-*` names resolve to the same codec, but new launchers should use
+`trq-*`. Stable TRQ v1 accepts `identity` and `affine_channel`; RoPE remains an
+explicit experiment and is not enabled by the production codec.
+
 ## Importance Top-K Policy
 
 `headwise_mode=topk` replaces the random high-precision group with a fixed
@@ -144,6 +149,6 @@ The policy file can contain explicit heads:
 ```
 
 or scores per layer / global head id.  The focused-forcing JSON-to-policy
-selection logic is implemented in `hwq.head_importance`; see
+selection logic is implemented in `trq.head_importance`; see
 `docs/head_importance_topk.md` for the aggregation command, Python API, and
 cross-machine path examples.

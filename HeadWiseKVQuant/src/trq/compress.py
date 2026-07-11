@@ -1,78 +1,116 @@
-from functools import lru_cache
 import os
+import numpy as np
 import torch
 from enum import Enum
 import re
-import math
-from .sim.quant.lowbit_quantize import (
-    nvfp4_e2m1_quantize_triton,
-    blockwise_int4_quantize_triton,
-    blockwise_int3_quantize_triton,
-    blockwise_int2_quantize_triton,
-)
 from .sim.quant.quantize_config import QuantizeConfig
+from .real.trq import normalize_trq_predictor_mode, trq_quantize_tensor
 
-from .functions import (
-    kmeans_quantize_tensor,
-    prq_quantize_tensor,
-    triton_prq_quantize_tensor,
-)
-from .packed_naive import packed_naive_quantize_tensor
-from .real.hrq import hrq_quantize_tensor
-
-# ── Per-process predictor param cache ──────────────────────────────
-_HRQ_PREDICTOR_CACHE: dict[str, dict | None] = {}
+# Per-process predictor parameter cache.
+_TRQ_PREDICTOR_CACHE: dict[str, dict] = {}
 
 
-def _resolve_hrq_params_path(quant_config, mode: str) -> str | None:
-    explicit = getattr(quant_config, "hrq_predictor_params_path", None)
+def _config_value(
+    quant_config,
+    canonical: str,
+    legacy: str | tuple[str, ...] | None,
+    default=None,
+):
+    value = getattr(quant_config, canonical, None)
+    if value is not None and value != "":
+        return value
+    if legacy is not None:
+        names = (legacy,) if isinstance(legacy, str) else legacy
+        for name in names:
+            value = getattr(quant_config, name, None)
+            if value is not None and value != "":
+                return value
+    return default
+
+
+def _resolve_trq_params_path(quant_config, mode: str, kv_key: str) -> str:
+    role_attr = "trq_v_predictor_params_path" if kv_key == "V" else "trq_k_predictor_params_path"
+    explicit = getattr(quant_config, role_attr, None)
+    if not explicit:
+        explicit = _config_value(
+            quant_config,
+            "trq_predictor_params_path",
+            (
+                "hrq_predictor_params_path",
+                "s2pp_v_affine_path" if kv_key == "V" else "s2pp_affine_path",
+            ),
+            None,
+        )
     if explicit:
         return explicit
-    params_dir = os.environ.get("HRQ_PREDICTOR_PARAMS_DIR", "assets/hrq_predictors")
+    params_dir = os.environ.get(
+        "TRQ_PREDICTOR_PARAMS_DIR",
+        os.environ.get("HRQ_PREDICTOR_PARAMS_DIR", "assets/trq_predictors"),
+    )
     return os.path.join(params_dir, f"{mode}_self_forcing_dmd.pt")
 
 
-def _load_hrq_predictor_params_lazy(quant_config) -> dict | None:
-    """Lazy-load and cache predictor params from disk; returns None for identity."""
-    mode = getattr(quant_config, "hrq_predictor_mode", "identity")
+def _load_trq_predictor_params_lazy(quant_config, mode: str, kv_key: str) -> dict | None:
+    """Lazy-load predictor params and fail closed for non-identity modes."""
     if mode == "identity":
         return None
-    path = _resolve_hrq_params_path(quant_config, mode)
-    if path is None:
-        return None
-    if path in _HRQ_PREDICTOR_CACHE:
-        return _HRQ_PREDICTOR_CACHE[path]
+    path = _resolve_trq_params_path(quant_config, mode, kv_key)
+    if path in _TRQ_PREDICTOR_CACHE:
+        return _TRQ_PREDICTOR_CACHE[path]
     if not os.path.exists(path):
-        print(f"[HRQ] WARNING: predictor params not found at {path!r}; "
-              "falling back to identity predictor.")
-        _HRQ_PREDICTOR_CACHE[path] = None
-        return None
-    params = torch.load(path, map_location="cpu", weights_only=False)
-    _HRQ_PREDICTOR_CACHE[path] = params
-    print(f"[HRQ] Loaded predictor params ({mode}) from {path!r}")
+        raise FileNotFoundError(
+            f"TRQ predictor_mode={mode!r} requires parameters, but {path!r} does not exist"
+        )
+    if path.endswith(".npz"):
+        with np.load(path, allow_pickle=False) as data:
+            if "alpha" not in data or "beta" not in data:
+                raise ValueError(f"TRQ affine .npz must contain alpha and beta: {path}")
+            params = {
+                "alpha": torch.from_numpy(data["alpha"].astype(np.float32)),
+                "beta": torch.from_numpy(data["beta"].astype(np.float32)),
+            }
+    else:
+        params = torch.load(path, map_location="cpu", weights_only=False)
+    if not isinstance(params, dict):
+        raise ValueError(f"TRQ predictor file must contain a dictionary: {path}")
+    _TRQ_PREDICTOR_CACHE[path] = params
+    print(f"[TRQ] Loaded predictor params ({mode}) from {path!r}")
     return params
 
 
-def _get_layer_predictor_params(quant_config, layer_idx: int | None,
-                                 kv_key: str, head_ids=None) -> dict | None:
-    """Return predictor_params for one hrq_quantize_tensor call (layer + K or V).
-
-    For affine_channel, slices alpha/beta by *head_ids* when provided.
-    For tiny_mlp, the MLP is head-agnostic so no slicing is needed.
-    """
-    if layer_idx is None:
-        return None
-    full = _load_hrq_predictor_params_lazy(quant_config)
+def _get_layer_predictor_params(
+    quant_config,
+    mode: str,
+    layer_idx: int | None,
+    kv_key: str,
+    head_ids=None,
+) -> dict | None:
+    """Return K/V predictor parameters, preserving supported shape variants."""
+    full = _load_trq_predictor_params_lazy(quant_config, mode, kv_key)
     if full is None:
         return None
-    params = full.get(kv_key, {}).get(layer_idx)
-    if params is None:
-        return None
-    if head_ids is not None and "alpha" in params:
+    if kv_key in full:
+        if layer_idx is None:
+            raise ValueError(f"TRQ predictor file is layer-specific for {kv_key}; layer_idx is required")
+        layer_table = full[kv_key]
+        params = layer_table.get(layer_idx, layer_table.get(str(layer_idx)))
+        if params is None:
+            raise KeyError(f"TRQ predictor file has no {kv_key} parameters for layer {layer_idx}")
+    else:
+        params = full
+    if "alpha" not in params or "beta" not in params:
+        raise ValueError(f"TRQ predictor parameters for {kv_key} require alpha and beta")
+    if head_ids is not None:
         idx = torch.tensor(list(head_ids), dtype=torch.long)
+        alpha = params["alpha"]
+        beta = params["beta"]
+        head_dim = 0 if alpha.ndim == 2 else 1 if alpha.ndim == 3 else None
+        if head_dim is not None:
+            alpha = alpha.index_select(head_dim, idx)
+            beta = beta.index_select(head_dim, idx)
         params = {
-            "alpha": params["alpha"][idx],
-            "beta": params["beta"][idx],
+            "alpha": alpha,
+            "beta": beta,
         }
     return params
 
@@ -90,11 +128,14 @@ class QuantizeFunctions(Enum):
     TRITON_PRQ = "triton_prq"
     TRITON_PRQ_CLIP = "triton_prq_clip"
     PACKED_NAIVE = "packed_naive"
-    HRQ = "hrq"
+    TRQ = "trq"
+    HRQ = "trq"
 
 
 def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
     if quant_type in ["naive-fp4", "kmeans-fp4", "nstages-kmeans-fp4", "nstages-kmeans-fp4-clip"]:
+        from .sim.quant.lowbit_quantize import nvfp4_e2m1_quantize_triton
+
         def quantize_fn(x):
             """Quantization function - replace this to use different methods."""
             return nvfp4_e2m1_quantize_triton(
@@ -103,6 +144,8 @@ def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
             )
 
     elif quant_type == "kmeans-fp4-clip":
+        from .sim.quant.lowbit_quantize import nvfp4_e2m1_quantize_triton
+
         def quantize_fn(x):
             """Quantization function with percentile clipping."""
             return nvfp4_e2m1_quantize_triton(
@@ -113,6 +156,8 @@ def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
             )
 
     elif quant_type in ["naive-int4", "kmeans-int4", "nstages-kmeans-int4", "nstages-kmeans-int4-clip"]:
+        from .sim.quant.lowbit_quantize import blockwise_int4_quantize_triton
+
         def quantize_fn(x):
             """Quantization function - replace this to use different methods."""
             return blockwise_int4_quantize_triton(
@@ -121,6 +166,8 @@ def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
             )
 
     elif quant_type == "kmeans-int4-clip":
+        from .sim.quant.lowbit_quantize import blockwise_int4_quantize_triton
+
         def quantize_fn(x):
             """Quantization function with percentile clipping."""
             return blockwise_int4_quantize_triton(
@@ -131,6 +178,8 @@ def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
             )
 
     elif quant_type in ["naive-int3", "kmeans-int3", "nstages-kmeans-int3", "nstages-kmeans-int3-clip"]:
+        from .sim.quant.lowbit_quantize import blockwise_int3_quantize_triton
+
         def quantize_fn(x):
             """Quantization function - replace this to use different methods."""
             return blockwise_int3_quantize_triton(
@@ -139,6 +188,8 @@ def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
             )
 
     elif quant_type == "kmeans-int3-clip":
+        from .sim.quant.lowbit_quantize import blockwise_int3_quantize_triton
+
         def quantize_fn(x):
             """Quantization function with percentile clipping."""
             return blockwise_int3_quantize_triton(
@@ -149,6 +200,8 @@ def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
             )
 
     elif quant_type in ["naive-int2", "kmeans-int2", "nstages-kmeans-int2", "nstages-kmeans-int2-clip"]:
+        from .sim.quant.lowbit_quantize import blockwise_int2_quantize_triton
+
         def quantize_fn(x):
             """Quantization function - replace this to use different methods."""
             return blockwise_int2_quantize_triton(
@@ -157,6 +210,8 @@ def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
             )
 
     elif quant_type == "kmeans-int2-clip":
+        from .sim.quant.lowbit_quantize import blockwise_int2_quantize_triton
+
         def quantize_fn(x):
             """Quantization function with percentile clipping."""
             return blockwise_int2_quantize_triton(
@@ -173,7 +228,7 @@ def get_quantize_fn(quant_type: str, quant_config: QuantizeConfig):
                 raise ValueError(f"Cannot identify num_bits from {quant_config.quant_type}")
             num_bits = int(m.group(1))
             return num_bits
-    elif quant_type in ["packed-naive-int2", "packed-naive-int4", "packed-naive-int8"] or quant_type.startswith("hrq"):
+    elif quant_type in ["packed-naive-int2", "packed-naive-int4", "packed-naive-int8"] or quant_type.startswith(("trq", "hrq", "s2pp")):
         """Packed/real quantization is handled in compress_kv_cache."""
         def quantize_fn(x):
             m = re.search(r'int(\d+)', quant_config.quant_type)
@@ -236,8 +291,8 @@ def get_quantize_type(quant_type: str):
         "packed-naive-int8",
     ]:
         quantize_type = QuantizeFunctions.PACKED_NAIVE
-    elif quant_type.startswith("hrq"):
-        quantize_type = QuantizeFunctions.HRQ
+    elif quant_type.startswith(("trq", "hrq", "s2pp")):
+        quantize_type = QuantizeFunctions.TRQ
     else:
         quantize_type = QuantizeFunctions.NAIVE
 
@@ -249,6 +304,8 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
     quantize_type = get_quantize_type(quant_type)
 
     if quantize_type == QuantizeFunctions.NSTAGE_KMEANS:
+        from .functions import prq_quantize_tensor
+
         # Apply PRQ (multi-stage K-Means) based quantization
         k_quant = prq_quantize_tensor(
             k,
@@ -265,6 +322,7 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
             quantize_fn=quantize_fn,
         )
     elif quantize_type == QuantizeFunctions.NSTAGE_KMEANS_CLIP:
+        from .functions import prq_quantize_tensor
 
         # Apply PRQ (multi-stage K-Means) based quantization
         k_quant = prq_quantize_tensor(
@@ -284,6 +342,8 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
             use_percentile_clipping=True,
         )
     elif quantize_type == QuantizeFunctions.KMEANS:
+        from .functions import kmeans_quantize_tensor
+
         # Apply K-Means based quantization
         k_quant = kmeans_quantize_tensor(
             k,
@@ -298,6 +358,8 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
             quantize_fn=quantize_fn,
         )
     elif quantize_type == QuantizeFunctions.TRITON_PRQ:
+        from .functions import triton_prq_quantize_tensor
+
         # Apply Triton N-Stage K-Means based quantization
         k_quant = triton_prq_quantize_tensor(
             k,
@@ -316,6 +378,8 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
             quantize_fn=quantize_fn,
         )
     elif quantize_type == QuantizeFunctions.TRITON_PRQ_CLIP:
+        from .functions import triton_prq_quantize_tensor
+
         # Apply Triton N-Stage K-Means based quantization
         k_quant = triton_prq_quantize_tensor(
             k,
@@ -342,6 +406,8 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
         k_quant = quantize_fn(k)
         v_quant = quantize_fn(v)
     elif quantize_type == QuantizeFunctions.PACKED_NAIVE:
+        from .packed_naive import packed_naive_quantize_tensor
+
         num_bits = quantize_fn(k)
         k_quant = packed_naive_quantize_tensor(
             k,
@@ -353,32 +419,76 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
             num_bits=num_bits,
             block_size=quant_config.quant_block_size,
         )
-    elif quantize_type == QuantizeFunctions.HRQ:
-        num_bits = quantize_fn(k)
-        _predictor_mode = getattr(quant_config, "hrq_predictor_mode", "identity")
-        _k_params = _get_layer_predictor_params(quant_config, layer_idx, "K", head_ids)
-        _v_params = _get_layer_predictor_params(quant_config, layer_idx, "V", head_ids)
-        k_quant = hrq_quantize_tensor(
-            k,
-            num_bits=num_bits,
-            block_size=getattr(quant_config, "hrq_group_size", quant_config.quant_block_size),
-            anchor_bits=getattr(quant_config, "hrq_anchor_bits", 4),
-            predictor_stride=getattr(quant_config, "hrq_predictor_stride", 1560),
-            predictor_mode=_predictor_mode,
-            predictor_params=_k_params,
-            scale_precision=getattr(quant_config, "hrq_scale_precision", torch.bfloat16),
-            residual_quant_mode=getattr(quant_config, "hrq_residual_quant_mode", "asym_zero_point"),
+    elif quantize_type == QuantizeFunctions.TRQ:
+        inferred_bits = quantize_fn(k)
+        k_bits = int(_config_value(quant_config, "trq_k_bits", "s2pp_k_bits", 0) or inferred_bits)
+        v_bits = int(_config_value(quant_config, "trq_v_bits", "s2pp_v_bits", 0) or inferred_bits)
+        predictor_mode = _config_value(
+            quant_config,
+            "trq_predictor_mode",
+            ("hrq_predictor_mode", "s2pp_predictor_mode"),
+            "identity",
         )
-        v_quant = hrq_quantize_tensor(
+        k_mode = _config_value(quant_config, "trq_k_predictor_mode", None, predictor_mode)
+        v_mode = _config_value(quant_config, "trq_v_predictor_mode", "s2pp_v_predictor_mode", predictor_mode)
+        if k_mode == "auto":
+            k_mode = "identity" if "identity" in quant_type else "affine_channel"
+        if v_mode == "auto":
+            v_mode = k_mode
+        k_mode = normalize_trq_predictor_mode(k_mode)
+        v_mode = normalize_trq_predictor_mode(v_mode)
+        k_params = _get_layer_predictor_params(quant_config, k_mode, layer_idx, "K", head_ids)
+        v_params = _get_layer_predictor_params(quant_config, v_mode, layer_idx, "V", head_ids)
+        group_size = _config_value(
+            quant_config,
+            "trq_group_size",
+            ("hrq_group_size", "s2pp_group_size"),
+            getattr(quant_config, "quant_block_size", 16),
+        )
+        anchor_bits = _config_value(
+            quant_config, "trq_anchor_bits", ("hrq_anchor_bits", "s2pp_anchor_bits"), 4
+        )
+        predictor_stride = _config_value(
+            quant_config,
+            "trq_predictor_stride",
+            ("hrq_predictor_stride", "s2pp_predictor_stride"),
+            1560,
+        )
+        scale_precision = _config_value(
+            quant_config,
+            "trq_scale_precision",
+            ("hrq_scale_precision", "s2pp_scale_precision"),
+            torch.bfloat16,
+        )
+        residual_quant_mode = _config_value(
+            quant_config,
+            "trq_residual_quant_mode",
+            ("hrq_residual_quant_mode", "s2pp_residual_quant_mode"),
+            "asym_zero_point",
+        )
+        k_quant = trq_quantize_tensor(
+            k,
+            num_bits=k_bits,
+            block_size=group_size,
+            anchor_bits=anchor_bits,
+            predictor_stride=predictor_stride,
+            predictor_mode=k_mode,
+            predictor_params=k_params,
+            layer_idx=layer_idx,
+            scale_precision=scale_precision,
+            residual_quant_mode=residual_quant_mode,
+        )
+        v_quant = trq_quantize_tensor(
             v,
-            num_bits=num_bits,
-            block_size=getattr(quant_config, "hrq_group_size", quant_config.quant_block_size),
-            anchor_bits=getattr(quant_config, "hrq_anchor_bits", 4),
-            predictor_stride=getattr(quant_config, "hrq_predictor_stride", 1560),
-            predictor_mode=_predictor_mode,
-            predictor_params=_v_params,
-            scale_precision=getattr(quant_config, "hrq_scale_precision", torch.bfloat16),
-            residual_quant_mode=getattr(quant_config, "hrq_residual_quant_mode", "asym_zero_point"),
+            num_bits=v_bits,
+            block_size=group_size,
+            anchor_bits=anchor_bits,
+            predictor_stride=predictor_stride,
+            predictor_mode=v_mode,
+            predictor_params=v_params,
+            layer_idx=layer_idx,
+            scale_precision=scale_precision,
+            residual_quant_mode=residual_quant_mode,
         )
     else:
         raise ValueError(f"Unsupported quant type: {quant_type}")

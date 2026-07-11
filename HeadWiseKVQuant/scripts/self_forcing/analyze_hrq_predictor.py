@@ -8,8 +8,8 @@ then for each layer:
   - Reports train vs held-out gap and residual statistics
 
 Outputs:
-  assets/hrq_predictors/affine_channel_self_forcing_dmd.pt
-  assets/hrq_predictors/tiny_mlp_self_forcing_dmd.pt
+  assets/trq_predictors/affine_channel_self_forcing_dmd.pt
+  assets/trq_predictors/tiny_mlp_self_forcing_dmd.pt
   results/selfforcing/vbench_eval_hrq_predictor/predictor_diagnostics.txt
 
 Usage:
@@ -17,7 +17,7 @@ Usage:
         --train_dumps kv_dumps/train_*.pt \\
         --heldout_dumps kv_dumps/heldout_*.pt \\
         [--predictor_stride 1560] \\
-        [--output_dir assets/hrq_predictors] \\
+        [--output_dir assets/trq_predictors] \\
         [--report_path results/selfforcing/vbench_eval_hrq_predictor/predictor_diagnostics.txt] \\
         [--device cuda] \\
         [--mlp_hidden_mult 1] \\
@@ -52,7 +52,7 @@ for _p in [os.path.join(_hwq_root, "src"), _sf_root]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from hwq.kv_cache import ChunkState  # noqa: E402 – must come after path setup
+from trq.kv_cache import ChunkState  # noqa: E402 – must come after path setup
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -825,7 +825,7 @@ def parse_args():
     p.add_argument("--heldout_dumps", default="",
                    help="Comma-separated or glob of held-out dump .pt files")
     p.add_argument("--predictor_stride", type=int, default=1560)
-    p.add_argument("--output_dir", default="assets/hrq_predictors")
+    p.add_argument("--output_dir", default="assets/trq_predictors")
     p.add_argument("--report_path",
                    default="results/selfforcing/vbench_eval_hrq_predictor/predictor_diagnostics.txt")
     p.add_argument("--device", default="cuda")

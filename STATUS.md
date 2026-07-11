@@ -2,9 +2,20 @@
 
 ## 当前目标
 
-- 将 `Self-Forcing` 场景下的 KV cache 低精度量化从 `QVG` 实验仓中独立出来，形成面向论文方法开发的 `HeadWiseKVQuant` 代码库，并在此基础上推进 `head-wise quant`。
+- 以 `HeadWiseKVQuant` 为主方法库，用统一的 TRQ codec 推进 Self-Forcing
+  长视频 KV cache 量化，并继续研究 head-wise / role-aware precision policy。
 
 ## 正在做什么
+
+- **TRQ 统一完成（2026-07-11）**：
+  - 本机主目录改为 `/Users/moweile/Code/LAB/videoquant-trq`。
+  - `src/trq/real/trq.py` 是 temporal residual quantization 唯一稳定实现；Python 包入口统一为 `trq`。
+  - v1 稳定 predictor 为 `identity`、`affine_channel`；RoPE 留待实验。
+  - `hrq-*`、`s2pp-*` 保留兼容入口，学弟的 `qvg` 仓库不再作为运行时依赖。
+  - CPU codec、真实 affine 参数、head-wise、K/V 位宽、cache 生命周期和诊断测试共 36 项通过。
+  - 协作者入口已更新：`HeadWiseKVQuant/README.md` 和 `docs/getting_started.md`。
+
+### 历史状态
 
 - **工作区已改为 Git worktree 隔离模式**（2026-05-23）：
   - 原目录 `/mnt/workspace/caipeiliang/code/moweile/videoquant` 只作为 detached HEAD 管理入口。
@@ -141,7 +152,7 @@
 - **修复 A100 兼容性**：
   - `fp8e4nv` 自动回退：`quant_pack.py` 新增 `_gpu_supports_fp8e4nv()`，非 Hopper GPU 自动降级 bf16
   - 视频保存：`inference.py` 从已废弃的 `torchvision.io.write_video` 切到 `imageio.mimsave`
-- 从 `QVG` 的 `quant_videogen` 中抽出可复用量化核心，整理到独立库 `HeadWiseKVQuant/src/hwq/`。
+- 从 `QVG` 的 `quant_videogen` 中抽出可复用量化核心，现已统一到独立库 `HeadWiseKVQuant/src/trq/`。
 - 新增 `hwq.headwise`：`RandomHeadPolicy`、`compress_headwise_kv_cache`。
 - 新增 `hwq.self_forcing`：`compress_self_forcing_cache_span`。
 - 已通过：`py_compile`、`python -m unittest discover -s tests -v`。

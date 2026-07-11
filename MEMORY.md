@@ -12,7 +12,12 @@
 
 ## Worktree 隔离布局
 
-- 2026-05-23 起，日常开发不在原目录切分支，而是使用兄弟 worktree：
+- 当前本机主仓库：`/Users/moweile/Code/LAB/videoquant-trq`。
+- 当前残差量化唯一稳定实现：`HeadWiseKVQuant/src/trq/real/trq.py`；Python 包名为 `trq`。
+- `hrq-*` / `s2pp-*` 是兼容别名；QVG 与学弟的 `qvg` 仓库保留作参考。
+- RoPE predictor 尚未进入稳定 codec，需后续独立实验决定。
+
+- 以下是 2026-05-23 服务器环境的历史 worktree 布局：
   - `videoquant-main` → `main`
   - `videoquant-prompt` → `HWQ_prompt_router`
   - `videoquant-online` → `hwq_online_calibration`

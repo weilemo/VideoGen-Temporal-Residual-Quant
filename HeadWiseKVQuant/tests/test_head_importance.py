@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 from unittest import TestCase
 
-from hwq.head_importance import (
+from trq.head_importance import (
     build_topk_policy_from_focused_forcing,
     load_focused_forcing_head_losses,
     select_top_heads_by_layer,
