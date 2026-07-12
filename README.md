@@ -20,7 +20,7 @@ python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
 
-## 当前本机布局
+## 当前本机布局（这部分不用看）
 
 ```text
 /Users/moweile/Code/LAB/
@@ -71,8 +71,3 @@ git status --short --branch
 - agent 切换前更新 `HANDOFF.md`，只保留下一位立刻需要的信息。
 - 单次训练、调试、环境排查、Slurm 作业提交，统一写到 `logs/`。
 - 服务器资源使用遵守 [服务器工作习惯.md](/data2/moweile-20251213/服务器工作习惯.md)。
-
-## 建议命名
-
-- 任务日志：`logs/2026-05-23_1230_worktree_reorg.md`
-- 如果涉及 Slurm，标题里尽量写脚本名、`jobid` 或节点信息。
