@@ -1,5 +1,23 @@
 # 快速交接
 
+## 当前入口
+
+```bash
+cd /Users/moweile/Code/LAB/videoquant-trq
+```
+
+当前仓库分工（2026-07-11）：
+
+| 目录 | 用途 |
+|---|---|
+| `videoquant-trq/HeadWiseKVQuant` | 当前方法主库，拥有 TRQ、PRQ、head-wise policy 和 Self-Forcing adapter |
+| `videoquant-trq/Quant-VideoGen` | 原始 QVG 基线参考 |
+| `../qvg` | 学弟的 S2++ 研究仓库，只作为迁移来源与对照 |
+
+新同学先读 `HeadWiseKVQuant/README.md` 和
+`HeadWiseKVQuant/docs/getting_started.md`；TRQ v1 的统一边界见
+`HeadWiseKVQuant/docs/trq_unification.md`。
+
 ## 当前接力点
 
 - `Self-Forcing` 八条实验线均已跑通，七条完成 VBench 评估（2-prompt），一条完成 32-prompt VBench 评估：
@@ -34,7 +52,7 @@
    - `HeadWiseKVQuant/README.md`
    - `HeadWiseKVQuant/docs/self_forcing_integration.md`
    - `HeadWiseKVQuant/docs/workspace_structure.md`
-   - `HeadWiseKVQuant/src/hwq/headwise.py`
+   - `HeadWiseKVQuant/src/trq/headwise.py`
 5. **优先任务**：全矩阵比较已完成！下一步：
    - Top-K × PRQ 叠加：DMD top-4 + PRQ int4+int2，可能的 SOTA 路线
    - QVG PRQ INT2 32-prompt baseline（形成 BF16 / PRQ / Top-K 三足对照）

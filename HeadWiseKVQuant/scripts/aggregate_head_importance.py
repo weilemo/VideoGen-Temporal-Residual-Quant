@@ -6,9 +6,9 @@ import importlib.util
 from pathlib import Path
 
 try:
-    from hwq.head_importance import build_topk_policy_from_focused_forcing, write_topk_policy
+    from trq.head_importance import build_topk_policy_from_focused_forcing, write_topk_policy
 except ModuleNotFoundError:
-    module_path = Path(__file__).resolve().parents[1] / "src" / "hwq" / "head_importance.py"
+    module_path = Path(__file__).resolve().parents[1] / "src" / "trq" / "head_importance.py"
     spec = importlib.util.spec_from_file_location("hwq_head_importance_standalone", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

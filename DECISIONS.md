@@ -2,7 +2,7 @@
 
 ## D-2026-05-06-01 项目级记录放在 `videoquant` 目录下
 
-- 决策：这套协作记录放在 `/data2/moweile-20251213/workspace/videoquant`。
+- 决策：这套协作记录放在 `/mnt/workspace/caipeiliang/code/moweile/videoquant`。
 - 原因：每个项目应维护自己的上下文，避免跨项目混用状态。
 - 影响：`Codex` 和 `CC` 处理 `videoquant` 时，默认先看本目录记录文件。
 
@@ -42,9 +42,9 @@
 
 ## D-2026-05-08-07 独立出 `HeadWiseKVQuant` 作为论文方法代码库
 
-- 决策：从 `Quant-VideoGen` 中抽出 KV cache 低精度量化框架，建立独立代码库 `/data2/moweile-20251213/workspace/videoquant/HeadWiseKVQuant`。
+- 决策：从 `Quant-VideoGen` 中抽出 KV cache 低精度量化框架，建立独立代码库 `/mnt/workspace/caipeiliang/code/moweile/videoquant-main/HeadWiseKVQuant`。
 - 原因：后续论文方法不应长期绑在 QVG 实验仓里；独立库更适合作为 `head-wise quant` 方法主体，便于模块化、复现实验和后续开源整理。
-- 影响：后续方法开发优先发生在 `HeadWiseKVQuant/src/hwq/`；`Quant-VideoGen` 的 `Self-Forcing` 代码应逐步退化为下游调用方，只负责推理调度和实验输出。
+- 影响：后续方法开发优先发生在当前统一目录 `HeadWiseKVQuant/src/trq/`（原 `src/hwq/`）；`Quant-VideoGen` 的 `Self-Forcing` 代码应逐步退化为下游调用方，只负责推理调度和实验输出。
 
 ## D-2026-05-08-08 `Quant-VideoGen` 作为下游集成入口调用 `hwq`
 
@@ -91,7 +91,7 @@
   - 首选 JSON，支持 `top_heads_by_layer` / `scores_by_layer` / `scores` / `global_scores`
   - 也支持 CSV/TXT：`global_head_id,score` 或 `layer,head,score`
 - 影响：运行时通过 `HEADWISE_MODE=topk` 和 `HEAD_IMPORTANCE_PATH` 启用；从 focused-forcing DMD loss JSON 生成 policy 时使用 `HeadWiseKVQuant/scripts/aggregate_head_importance.py`。
-- 进一步约定：选头逻辑属于方法库本身，放在 `HeadWiseKVQuant/src/hwq/head_importance.py`；`scripts/aggregate_head_importance.py` 只是 CLI wrapper，避免选头逻辑散落在实验脚本中。
+- 进一步约定：选头逻辑属于方法库本身，当前路径为 `HeadWiseKVQuant/src/trq/head_importance.py`；`scripts/aggregate_head_importance.py` 只是 CLI wrapper，避免选头逻辑散落在实验脚本中。
 - 进一步约定：head ablation / DMD-loss calibration 也属于 `HeadWiseKVQuant` 的 vendored Self-Forcing backend；外部 `focused-forcing-code` 只作为算法参考，不作为运行时依赖。
 
 ## D-2026-05-17-13 VBench 评估确认 6 条实验线的量化质量排序
@@ -101,3 +101,15 @@
   - BF16 (0.6486) ≈ Packed int8+int4 (0.6479, ↓0.10%) ≈ QVG INT2 (0.6469, ↓0.26%) > R-HWQ-4h PRQ (0.6416, ↓1.07%) > Packed int4+int2 (0.6279, ↓3.19%) > Naive (0.5954, ↓8.19%)
   - int8+int4 packed-naive 几乎无损，且无需 k-means 聚类，适合作为论文中的轻量化 baseline
 - 影响：后续实验矩阵中 packed-naive 的推荐默认配置为 int8+int4 (R-HWQ-4h)；int4+int2 退化明显，不适合作为 low-bit 场景的首选
+
+## D-2026-05-23-14 用 Git worktree 隔离并行研究分支
+
+- 决策：`videoquant` 原目录改为 detached HEAD 管理入口，`main`、prompt router、online calibration、HRQ residual quant 分别使用独立兄弟 worktree。
+- 原因：多个 agent / Claude Code / Codex 同时工作时，共享一个 checkout 会导致未提交改动随 `git checkout` 漂移，甚至互相切走当前分支。
+- 当前布局：
+  - `/mnt/workspace/caipeiliang/code/moweile/videoquant-main` → `main`
+  - `/mnt/workspace/caipeiliang/code/moweile/videoquant-prompt` → `HWQ_prompt_router`
+  - `/mnt/workspace/caipeiliang/code/moweile/videoquant-online` → `hwq_online_calibration`
+  - `/mnt/workspace/caipeiliang/code/moweile/videoquant-hrq` → `feature/hwq-residual-quant`
+- 影响：后续任务必须先进入对应 `videoquant-*` 目录；原目录只用于 `git worktree list`、`git branch -vv`、`git worktree add/remove/prune`。
+- 进一步约定：实验结果、`HeadWiseKVQuant/tmp/`、Mac `._*` 文件和 docs PDF 通过本地 exclude 排除，不进入方法分支。

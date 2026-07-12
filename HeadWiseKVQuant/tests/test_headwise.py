@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import torch
 
-from hwq.compress import compress_kv_cache, get_quantize_fn
-from hwq.headwise import RandomHeadPolicy, TopKHeadPolicy, compress_headwise_kv_cache, load_topk_head_policy
-from hwq.uncompress import uncompress_single_cache
+from trq.compress import compress_kv_cache, get_quantize_fn
+from trq.headwise import RandomHeadPolicy, TopKHeadPolicy, compress_headwise_kv_cache, load_topk_head_policy
+from trq.uncompress import uncompress_single_cache
 
 
 class HeadwiseTests(TestCase):
@@ -60,7 +60,7 @@ class HeadwiseTests(TestCase):
         def fake_get_quantize_fn(quant_type, quant_config):
             return lambda x: x
 
-        def fake_compress_kv_cache(k, v, quant_type, quant_config, quantize_fn):
+        def fake_compress_kv_cache(k, v, quant_type, quant_config, quantize_fn, **kwargs):
             seen.append((quant_type, k.shape[1]))
             return k, v
 
@@ -82,8 +82,8 @@ class HeadwiseTests(TestCase):
         k = torch.randn(1, 4, 8, 16)
         v = torch.randn(1, 4, 8, 16)
 
-        with patch("hwq.headwise.get_quantize_fn", fake_get_quantize_fn), patch(
-            "hwq.headwise.compress_kv_cache", fake_compress_kv_cache
+        with patch("trq.headwise.get_quantize_fn", fake_get_quantize_fn), patch(
+            "trq.headwise.compress_kv_cache", fake_compress_kv_cache
         ):
             k_cache, v_cache = compress_headwise_kv_cache(k, v, quant_config, policy)
 
@@ -135,7 +135,7 @@ class HeadwiseTests(TestCase):
         def fake_get_quantize_fn(quant_type, quant_config):
             return lambda x: x
 
-        def fake_compress_kv_cache(k, v, quant_type, quant_config, quantize_fn):
+        def fake_compress_kv_cache(k, v, quant_type, quant_config, quantize_fn, **kwargs):
             seen.append((quant_type, k.shape[1], k[:, :, 0, 0].flatten().tolist()))
             return k, v
 
@@ -156,8 +156,8 @@ class HeadwiseTests(TestCase):
         k = torch.arange(1 * 4 * 2 * 1, dtype=torch.float32).reshape(1, 4, 2, 1)
         v = k.clone()
 
-        with patch("hwq.headwise.get_quantize_fn", fake_get_quantize_fn), patch(
-            "hwq.headwise.compress_kv_cache", fake_compress_kv_cache
+        with patch("trq.headwise.get_quantize_fn", fake_get_quantize_fn), patch(
+            "trq.headwise.compress_kv_cache", fake_compress_kv_cache
         ):
             k_cache, _ = compress_headwise_kv_cache(k, v, quant_config, policy, layer_idx=3)
 

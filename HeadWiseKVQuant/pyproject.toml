@@ -10,12 +10,19 @@ requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 dependencies = [
     "torch>=2.1",
-    "triton>=2.2",
     "numpy>=1.24",
     "termcolor>=2.3",
     "loguru>=0.7",
 ]
 
+[project.optional-dependencies]
+gpu = [
+    "triton>=2.2; platform_system == 'Linux'",
+]
+analysis = [
+    "matplotlib>=3.8",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["hwq*"]
+include = ["trq*"]

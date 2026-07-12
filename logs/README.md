@@ -9,4 +9,4 @@
 - 训练、评测、环境排查、Slurm 提交都建议记日志
 - 最少记录：目标、关键命令、关键路径、结果、问题、下一步
 
-可直接复制 [TASK_TEMPLATE.md](/data2/moweile-20251213/workspace/videoquant/TASK_TEMPLATE.md) 作为起点。
+可直接复制 [TASK_TEMPLATE.md](/mnt/workspace/caipeiliang/code/moweile/videoquant-main/TASK_TEMPLATE.md) 作为起点。

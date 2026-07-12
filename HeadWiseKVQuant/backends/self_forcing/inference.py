@@ -46,6 +46,15 @@ parser.add_argument("--cache_num_v_centroids", type=int, default=256, help="Numb
 parser.add_argument("--kmeans_max_iters", type=int, default=100, help="Maximum iterations for K-Means clustering")
 parser.add_argument("--quant_block_size", type=int, default=16, help="Block size for quantization")
 parser.add_argument("--num_prq_stages", type=int, default=1, help="Number of PRQ stages for nstages-kmeans quantization")
+parser.add_argument("--trq_group_size", "--hrq_group_size", dest="trq_group_size", type=int, default=64, help="Group size for TRQ")
+parser.add_argument("--trq_anchor_bits", "--hrq_anchor_bits", dest="trq_anchor_bits", type=int, default=4, help="Anchor bit width for TRQ")
+parser.add_argument("--trq_predictor_stride", "--hrq_predictor_stride", dest="trq_predictor_stride", type=int, default=1560, help="Predictor stride for TRQ")
+parser.add_argument("--trq_predictor_mode", "--hrq_predictor_mode", dest="trq_predictor_mode", type=str, default="identity", choices=["identity", "affine_channel", "affine"], help="Stable TRQ predictor")
+parser.add_argument("--trq_predictor_params_path", "--hrq_predictor_params_path", dest="trq_predictor_params_path", type=str, default="", help="Path to fitted affine predictor params (.pt or .npz)")
+parser.add_argument("--trq_scale_precision", "--hrq_scale_precision", dest="trq_scale_precision", type=str, default="bf16", help="Scale precision for TRQ")
+parser.add_argument("--trq_residual_quant_mode", "--hrq_residual_quant_mode", dest="trq_residual_quant_mode", type=str, default="asym_zero_point", help="Residual quantization mode for TRQ")
+parser.add_argument("--trq_k_bits", type=int, default=0, help="Optional K residual bit override")
+parser.add_argument("--trq_v_bits", type=int, default=0, help="Optional V residual bit override")
 parser.add_argument("--headwise_mode", type=str, default="none", help="Head-wise policy mode: none, random, or topk")
 parser.add_argument("--headwise_seed", type=int, default=0, help="Random seed used for head-wise grouping")
 parser.add_argument("--num_high_precision_heads", type=int, default=0, help="How many heads use the high-precision quant type")
@@ -91,6 +100,15 @@ config.quant_config = {
     "kmeans_max_iters": args.kmeans_max_iters,
     "quant_block_size": args.quant_block_size,
     "num_prq_stages": args.num_prq_stages,
+    "trq_group_size": args.trq_group_size,
+    "trq_anchor_bits": args.trq_anchor_bits,
+    "trq_predictor_stride": args.trq_predictor_stride,
+    "trq_predictor_mode": args.trq_predictor_mode,
+    "trq_predictor_params_path": args.trq_predictor_params_path,
+    "trq_scale_precision": args.trq_scale_precision,
+    "trq_residual_quant_mode": args.trq_residual_quant_mode,
+    "trq_k_bits": args.trq_k_bits,
+    "trq_v_bits": args.trq_v_bits,
     "headwise_mode": args.headwise_mode,
     "headwise_seed": args.headwise_seed,
     "num_high_precision_heads": args.num_high_precision_heads,
