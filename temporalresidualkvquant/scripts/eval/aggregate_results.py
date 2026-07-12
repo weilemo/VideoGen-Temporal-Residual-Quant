@@ -274,7 +274,7 @@ def print_comparison_table(all_results):
 
 
 def main():
-    input_dir = sys.argv[1] if len(sys.argv) > 1 else "HeadWiseKVQuant/results/selfforcing/vbench_eval"
+    input_dir = sys.argv[1] if len(sys.argv) > 1 else "temporalresidualkvquant/results/selfforcing/vbench_eval"
 
     if not os.path.isdir(input_dir):
         print(f"Error: directory not found: {input_dir}")

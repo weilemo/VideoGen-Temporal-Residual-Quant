@@ -38,7 +38,7 @@ other heads: packed-naive-int2
 
 ## Build A Policy From Focused-Forcing Outputs
 
-`HeadWiseKVQuant` now contains the full analysis chain.  The vendored
+`temporalresidualkvquant` now contains the full analysis chain.  The vendored
 Self-Forcing backend can mask one global attention head per sample, compute DMD
 loss, save the focused-forcing-style JSON files, and aggregate them into a
 top-k policy.
@@ -46,7 +46,7 @@ top-k policy.
 Run the complete calibration / policy-generation step:
 
 ```bash
-cd /data2/moweile-20251213/workspace/videoquant/HeadWiseKVQuant
+cd /data2/moweile-20251213/workspace/videoquant/temporalresidualkvquant
 
 bash scripts/self_forcing/run_head_importance_analysis.sh
 ```
@@ -99,7 +99,7 @@ them into one top-k policy.  The selection logic lives in the library module
 `trq.head_importance`; the script below is a thin CLI wrapper:
 
 ```bash
-cd /data2/moweile-20251213/workspace/videoquant/HeadWiseKVQuant
+cd /data2/moweile-20251213/workspace/videoquant/temporalresidualkvquant
 
 python scripts/aggregate_head_importance.py \
   --input /path/to/focusedforcing_dm_loss_outputs \
@@ -159,7 +159,7 @@ want to test a specific selection.
 On this machine:
 
 ```bash
-cd /data2/moweile-20251213/workspace/videoquant/HeadWiseKVQuant
+cd /data2/moweile-20251213/workspace/videoquant/temporalresidualkvquant
 
 HEAD_IMPORTANCE_PATH=assets/head_importance/top4_dmd_loss.json \
   bash scripts/self_forcing/run_packed_naive_topk_hwq.sh
@@ -180,7 +180,7 @@ QUANT_TYPE=packed-naive-int2 \
 Outputs are written under:
 
 ```text
-HeadWiseKVQuant/results/selfforcing/topk_<policy-name>_hi_4_packed-naive-int4_lo_packed-naive-int2_64/
+temporalresidualkvquant/results/selfforcing/topk_<policy-name>_hi_4_packed-naive-int4_lo_packed-naive-int2_64/
 ```
 
 ## Path Handling On Another Machine
@@ -188,19 +188,19 @@ HeadWiseKVQuant/results/selfforcing/topk_<policy-name>_hi_4_packed-naive-int4_lo
 The launchers infer paths in this order:
 
 1. `SELF_FORCING_CKPT_ROOT`, if set
-2. `HeadWiseKVQuant/ckpts/Self-Forcing`, if present
+2. `temporalresidualkvquant/ckpts/Self-Forcing`, if present
 3. `QVG_ROOT/ckpts/Self-Forcing`, if `QVG_ROOT` is set
 
 For a different checkout path, use absolute paths:
 
 ```bash
-cd /mnt/workspace/caipeiliang/code/moweile/videoquant/HeadWiseKVQuant
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant/temporalresidualkvquant
 
-SELF_FORCING_CKPT_ROOT=/mnt/workspace/caipeiliang/code/moweile/videoquant/HeadWiseKVQuant/ckpts/Self-Forcing \
+SELF_FORCING_CKPT_ROOT=/mnt/workspace/caipeiliang/code/moweile/videoquant/temporalresidualkvquant/ckpts/Self-Forcing \
 bash scripts/self_forcing/run_head_importance_analysis.sh
 
-SELF_FORCING_CKPT_ROOT=/mnt/workspace/caipeiliang/code/moweile/videoquant/HeadWiseKVQuant/ckpts/Self-Forcing \
-HEAD_IMPORTANCE_PATH=/mnt/workspace/caipeiliang/code/moweile/videoquant/HeadWiseKVQuant/assets/head_importance/top4_dmd_loss.json \
+SELF_FORCING_CKPT_ROOT=/mnt/workspace/caipeiliang/code/moweile/videoquant/temporalresidualkvquant/ckpts/Self-Forcing \
+HEAD_IMPORTANCE_PATH=/mnt/workspace/caipeiliang/code/moweile/videoquant/temporalresidualkvquant/assets/head_importance/top4_dmd_loss.json \
   bash scripts/self_forcing/run_packed_naive_topk_hwq.sh
 ```
 
@@ -211,7 +211,7 @@ QVG_ROOT=/mnt/workspace/caipeiliang/code/moweile/videoquant/Quant-VideoGen \
 bash scripts/self_forcing/run_head_importance_analysis.sh
 
 QVG_ROOT=/mnt/workspace/caipeiliang/code/moweile/videoquant/Quant-VideoGen \
-HEAD_IMPORTANCE_PATH=/mnt/workspace/caipeiliang/code/moweile/videoquant/HeadWiseKVQuant/assets/head_importance/top4_dmd_loss.json \
+HEAD_IMPORTANCE_PATH=/mnt/workspace/caipeiliang/code/moweile/videoquant/temporalresidualkvquant/assets/head_importance/top4_dmd_loss.json \
   bash scripts/self_forcing/run_packed_naive_topk_hwq.sh
 ```
 

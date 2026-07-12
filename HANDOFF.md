@@ -10,18 +10,18 @@ cd /Users/moweile/Code/LAB/videoquant-trq
 
 | 目录 | 用途 |
 |---|---|
-| `videoquant-trq/HeadWiseKVQuant` | 当前方法主库，拥有 TRQ、PRQ、head-wise policy 和 Self-Forcing adapter |
+| `videoquant-trq/temporalresidualkvquant` | 当前方法主库，拥有 TRQ、PRQ、head-wise policy 和 Self-Forcing adapter |
 | `videoquant-trq/Quant-VideoGen` | 原始 QVG 基线参考 |
 | `../qvg` | 学弟的 S2++ 研究仓库，只作为迁移来源与对照 |
 
-新同学先读 `HeadWiseKVQuant/README.md` 和
-`HeadWiseKVQuant/docs/getting_started.md`；TRQ v1 的统一边界见
-`HeadWiseKVQuant/docs/trq_unification.md`。
+新同学先读 `temporalresidualkvquant/README.md` 和
+`temporalresidualkvquant/docs/getting_started.md`；TRQ v1 的统一边界见
+`temporalresidualkvquant/docs/trq_unification.md`。
 
 ## 当前接力点
 
 - `Self-Forcing` 八条实验线均已跑通，七条完成 VBench 评估（2-prompt），一条完成 32-prompt VBench 评估：
-  - 2-prompt 结果位于 `HeadWiseKVQuant/results/selfforcing/`：
+  - 2-prompt 结果位于 `temporalresidualkvquant/results/selfforcing/`：
     - `bf16/` — BF16 baseline (Final Score: 0.6486)
     - `triton-nstages-kmeans-int2_64/kc_256_vc_256_nstages_1/` — QVG INT2 baseline (0.6469, ↓0.26%)
     - `rhwq_seed_0_hi_4_triton-nstages-kmeans-int4_lo_triton-nstages-kmeans-int2_64/kc_256_vc_256_nstages_1/` — R-HWQ-4h PRQ (0.6416, ↓1.07%)
@@ -30,8 +30,8 @@ cd /Users/moweile/Code/LAB/videoquant-trq
     - `topk_top4_dmd_loss_hi_4_packed-naive-int4_lo_packed-naive-int2_64/kc_256_vc_256_nstages_1/` — Top-K HWQ Packed int4+int2 (0.6303, ↓2.82%)
     - `topk_top4_dmd_loss_hi_4_packed-naive-int8_lo_packed-naive-int4_64/kc_256_vc_256_nstages_1/` — **Top-K HWQ Packed int8+int4 (0.7615, ↓0.23%, 32 prompts)** ← 新增
   - 32-prompt MovieGenVideoBench 结果：`results/selfforcing/vbench_eval_mb32/comparison_summary.json`
-- VBench 评估完整结果：`HeadWiseKVQuant/results/selfforcing/vbench_eval/comparison_summary.json`
-- 评估脚本：`HeadWiseKVQuant/scripts/eval/evaluate_experiments.sh` 和 `scripts/eval/aggregate_results.py`
+- VBench 评估完整结果：`temporalresidualkvquant/results/selfforcing/vbench_eval/comparison_summary.json`
+- 评估脚本：`temporalresidualkvquant/scripts/eval/evaluate_experiments.sh` 和 `scripts/eval/aggregate_results.py`
 - **Importance top-k policy 已就绪**：
   - 完整 per-layer top-4 head policy: `assets/head_importance/top4_dmd_loss.json`（30 layers × 12 heads, 360 scores）
   - 来源: `external/focused-forcing-code/focusedforcing_sf/dm_loss.json` → `scripts/aggregate_head_importance.py`
@@ -49,10 +49,10 @@ cd /Users/moweile/Code/LAB/videoquant-trq
    - **32-prompt**: `results/selfforcing/vbench_eval_mb32/comparison_summary.json` ← 新
 3. 查看量化方案文档：`docs/quantization_approaches.md`
 4. 再看独立库结构：
-   - `HeadWiseKVQuant/README.md`
-   - `HeadWiseKVQuant/docs/self_forcing_integration.md`
-   - `HeadWiseKVQuant/docs/workspace_structure.md`
-   - `HeadWiseKVQuant/src/trq/headwise.py`
+   - `temporalresidualkvquant/README.md`
+   - `temporalresidualkvquant/docs/self_forcing_integration.md`
+   - `temporalresidualkvquant/docs/workspace_structure.md`
+   - `temporalresidualkvquant/src/trq/headwise.py`
 5. **优先任务**：全矩阵比较已完成！下一步：
    - Top-K × PRQ 叠加：DMD top-4 + PRQ int4+int2，可能的 SOTA 路线
    - QVG PRQ INT2 32-prompt baseline（形成 BF16 / PRQ / Top-K 三足对照）
@@ -75,9 +75,9 @@ cd /Users/moweile/Code/LAB/videoquant-trq
 - 当前核心目标是 `forcing-based long video generation` 的 KV cache 量化。
 - 重点质量维度：`identity consistency`、`scene consistency`、`motion continuity`。
 - 当前优先路线：
-  - 以 `HeadWiseKVQuant` 为方法代码库推进 `head-wise quant`
+  - 以 `temporalresidualkvquant` 为方法代码库推进 `head-wise quant`
   - 以 `Self-Forcing` 为实验集成入口
-  - 从 `HeadWiseKVQuant/scripts/self_forcing/` 启动实验
+  - 从 `temporalresidualkvquant/scripts/self_forcing/` 启动实验
 - 当前研究重点：
   - `importance metric`：定义 head 重要性分数（当前: DMD loss，Top-K vs Random = +0.38pp）
   - `importance collection`：离线 calibration / 在线估计 / 前几个 chunk 后固定
@@ -123,8 +123,8 @@ cd /Users/moweile/Code/LAB/videoquant-trq
 \** 据量化类型推算（结果在共享盘生成）
 32-prompt 所有显存数据均为实测
 
-- 实验产物统一放到 `HeadWiseKVQuant/results/`（不要放 `outputs/`）。
-- 本机权重位于 `HeadWiseKVQuant/ckpts/Self-Forcing/`（不进 git）。
+- 实验产物统一放到 `temporalresidualkvquant/results/`（不要放 `outputs/`）。
+- 本机权重位于 `temporalresidualkvquant/ckpts/Self-Forcing/`（不进 git）。
 - 运行环境：
   - Self-Forcing 推理：`conda activate forcing`
   - VBench 评估：`conda activate vbench`（注意：`source /mnt/workspace/caipeiliang/miniconda3/etc/profile.d/conda.sh`）

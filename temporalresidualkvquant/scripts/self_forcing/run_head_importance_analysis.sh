@@ -35,7 +35,7 @@ allow_incomplete="${ALLOW_INCOMPLETE:-0}"
 delete_latents_after_scoring="${DELETE_LATENTS_AFTER_SCORING:-0}"
 skip_existing="${SKIP_EXISTING:-1}"
 
-echo "HeadWiseKVQuant root: ${hwq_root}"
+echo "temporalresidualkvquant root: ${hwq_root}"
 echo "Self-Forcing backend: ${self_forcing_root}"
 echo "Self-Forcing ckpt root: ${ckpt_root}"
 echo "Checkpoint: ${ckpt_path}"

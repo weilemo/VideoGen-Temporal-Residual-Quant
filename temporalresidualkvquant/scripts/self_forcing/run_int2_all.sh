@@ -18,12 +18,21 @@ prompts_path="${PROMPTS_PATH:-${hwq_root}/assets/t2v.txt}"
 local_attn_size="${LOCAL_ATTN_SIZE:-180}"
 num_output_frames="${NUM_OUTPUT_FRAMES:-180}"
 ckpt_path="${CKPT_PATH:-${ckpt_root}/self_forcing_dmd.pt}"
-output_folder="${OUTPUT_FOLDER:-${hwq_root}/outputs/self_forcing/bf16}"
 
-echo "HeadWiseKVQuant root: ${hwq_root}"
+quant_type="${QUANT_TYPE:-triton-nstages-kmeans-int2}"
+cache_num_k_centroids="${CACHE_NUM_K_CENTROIDS:-256}"
+cache_num_v_centroids="${CACHE_NUM_V_CENTROIDS:-256}"
+kmeans_max_iters="${KMEANS_MAX_ITERS:-2}"
+quant_block_size="${QUANT_BLOCK_SIZE:-64}"
+num_prq_stages="${NUM_PRQ_STAGES:-1}"
+
+quant_dir="${quant_type}_${quant_block_size}/kc_${cache_num_k_centroids}_vc_${cache_num_v_centroids}_nstages_${num_prq_stages}"
+output_folder="${OUTPUT_FOLDER:-${hwq_root}/outputs/self_forcing/${quant_dir}}"
+
+echo "temporalresidualkvquant root: ${hwq_root}"
 echo "Self-Forcing backend: ${self_forcing_root}"
 echo "Self-Forcing ckpt root: ${ckpt_root}"
-echo "Running Self-Forcing BF16 baseline"
+echo "Running Self-Forcing INT2-all baseline"
 echo "Output: ${output_folder}"
 
 export PYTHONPATH="${hwq_root}/src:${self_forcing_root}:${PYTHONPATH:-}"
@@ -39,4 +48,9 @@ DUMP_KV_LEVEL="${DUMP_KV_LEVEL:-0}" torchrun --nproc_per_node=1 --standalone "${
   --local_attn_size "${local_attn_size}" \
   --use_ema \
   --save_with_index \
-  --quant_type none
+  --quant_type "${quant_type}" \
+  --cache_num_k_centroids "${cache_num_k_centroids}" \
+  --cache_num_v_centroids "${cache_num_v_centroids}" \
+  --kmeans_max_iters "${kmeans_max_iters}" \
+  --quant_block_size "${quant_block_size}" \
+  --num_prq_stages "${num_prq_stages}"

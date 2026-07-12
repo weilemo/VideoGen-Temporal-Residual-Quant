@@ -1,6 +1,6 @@
 # TRQ Unification
 
-`HeadWiseKVQuant` is the canonical implementation workspace for temporal
+`temporalresidualkvquant` is the canonical implementation workspace for temporal
 residual KV-cache quantization. Stable capabilities migrated from the former
 HRQ implementation and QVG S2++ are exposed through one public codec contract:
 TRQ. The QVG repository itself remains an unchanged reference source.

@@ -106,7 +106,7 @@ dump 约 48 GiB/prompt，总磁盘预算约 200 GiB。`layer_shards` 模式按 l
 机器和 checkpoint 到位后，一条命令采集并运行两项 identity 实验：
 
 ```bash
-cd /Users/moweile/Code/LAB/videoquant-trq/HeadWiseKVQuant
+cd /Users/moweile/Code/LAB/videoquant-trq/temporalresidualkvquant
 
 SELF_FORCING_CKPT_ROOT=/path/to/Self-Forcing \
 COLLECT_DUMPS=1 \

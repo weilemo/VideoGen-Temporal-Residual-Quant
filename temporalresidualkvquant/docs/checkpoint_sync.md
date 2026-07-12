@@ -3,7 +3,7 @@
 Large model files are kept locally under:
 
 ```text
-HeadWiseKVQuant/ckpts/Self-Forcing/
+temporalresidualkvquant/ckpts/Self-Forcing/
 ```
 
 This directory is ignored by git, so checkpoints are never pushed to GitHub.
@@ -30,10 +30,10 @@ git pull
 git rev-parse HEAD
 ```
 
-Then download the model files into `HeadWiseKVQuant`:
+Then download the model files into `temporalresidualkvquant`:
 
 ```bash
-cd /mnt/workspace/caipeiliang/code/moweile/videoquant/HeadWiseKVQuant
+cd /mnt/workspace/caipeiliang/code/moweile/videoquant/temporalresidualkvquant
 mkdir -p ckpts/Self-Forcing
 
 huggingface-cli download Wan-AI/Wan2.1-T2V-1.3B \
@@ -51,7 +51,7 @@ rmdir ckpts/Self-Forcing/checkpoints
 Expected local layout:
 
 ```text
-HeadWiseKVQuant/ckpts/Self-Forcing/
+temporalresidualkvquant/ckpts/Self-Forcing/
 ├── self_forcing_dmd.pt
 └── Wan2.1-T2V-1.3B/
     ├── Wan2.1_VAE.pth
@@ -72,14 +72,14 @@ You can also copy from an existing machine that already has the files:
 
 ```bash
 rsync -a --info=progress2 \
-  /data2/moweile-20251213/workspace/videoquant/HeadWiseKVQuant/ckpts/Self-Forcing/ \
-  USER@HOST:/mnt/workspace/caipeiliang/code/moweile/videoquant/HeadWiseKVQuant/ckpts/Self-Forcing/
+  /data2/moweile-20251213/workspace/videoquant/temporalresidualkvquant/ckpts/Self-Forcing/ \
+  USER@HOST:/mnt/workspace/caipeiliang/code/moweile/videoquant/temporalresidualkvquant/ckpts/Self-Forcing/
 ```
 
 ## Run With External Checkpoints
 
 If the other machine already has a trusted shared checkpoint directory, you can
-avoid copying into `HeadWiseKVQuant/ckpts`:
+avoid copying into `temporalresidualkvquant/ckpts`:
 
 ```bash
 SELF_FORCING_CKPT_ROOT=/path/to/ckpts/Self-Forcing \
@@ -99,7 +99,7 @@ checkpoint path:
 
 ```bash
 SELF_FORCING_CKPT_ROOT=/path/to/ckpts/Self-Forcing \
-HEAD_IMPORTANCE_PATH=/path/to/HeadWiseKVQuant/assets/head_importance/top4_dmd_loss.json \
+HEAD_IMPORTANCE_PATH=/path/to/temporalresidualkvquant/assets/head_importance/top4_dmd_loss.json \
   bash scripts/self_forcing/run_packed_naive_topk_hwq.sh
 ```
 
@@ -107,6 +107,6 @@ If checkpoints live in an existing QVG checkout:
 
 ```bash
 QVG_ROOT=/path/to/videoquant/Quant-VideoGen \
-HEAD_IMPORTANCE_PATH=/path/to/videoquant/HeadWiseKVQuant/assets/head_importance/top4_dmd_loss.json \
+HEAD_IMPORTANCE_PATH=/path/to/videoquant/temporalresidualkvquant/assets/head_importance/top4_dmd_loss.json \
   bash scripts/self_forcing/run_packed_naive_topk_hwq.sh
 ```

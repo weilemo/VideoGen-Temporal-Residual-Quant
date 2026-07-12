@@ -11,13 +11,13 @@ outputs/
 logs/
 checkpoints/
 runs/
-HeadWiseKVQuant/ckpts/
-HeadWiseKVQuant/outputs/
+temporalresidualkvquant/ckpts/
+temporalresidualkvquant/outputs/
 
 *.pt
 *.pth
-!HeadWiseKVQuant/assets/trq_predictors/
-!HeadWiseKVQuant/assets/trq_predictors/*.pt
+!temporalresidualkvquant/assets/trq_predictors/
+!temporalresidualkvquant/assets/trq_predictors/*.pt
 *.ckpt
 *.bin
 *.safetensors

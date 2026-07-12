@@ -23,7 +23,7 @@ output_folder=results/selfforcing/${quant_dir}
 echo "Running inference with checkpoint $ckpt_path and prompts from $prompts_path"
 echo "Output will be saved to $output_folder"
 
-export PYTHONPATH=../HeadWiseKVQuant/src:experiments/Self-Forcing:.
+export PYTHONPATH=../temporalresidualkvquant/src:experiments/Self-Forcing:.
 
 DUMP_KV_LEVEL=0 torchrun --nproc_per_node=1 --standalone experiments/Self-Forcing/inference.py \
   --config_path experiments/Self-Forcing/configs/self_forcing_dmd.yaml \

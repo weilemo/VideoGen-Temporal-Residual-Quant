@@ -2,7 +2,7 @@
 
 ## 当前目标
 
-- 以 `HeadWiseKVQuant` 为主方法库，用统一的 TRQ codec 推进 Self-Forcing
+- 以 `temporalresidualkvquant` 为主方法库，用统一的 TRQ codec 推进 Self-Forcing
   长视频 KV cache 量化，并继续研究 head-wise / role-aware precision policy。
 
 ## 正在做什么
@@ -13,7 +13,7 @@
   - v1 稳定 predictor 为 `identity`、`affine_channel`；RoPE 留待实验。
   - `hrq-*`、`s2pp-*` 保留兼容入口，学弟的 `qvg` 仓库不再作为运行时依赖。
   - CPU codec、真实 affine 参数、head-wise、K/V 位宽、cache 生命周期和诊断测试共 36 项通过。
-  - 协作者入口已更新：`HeadWiseKVQuant/README.md` 和 `docs/getting_started.md`。
+  - 协作者入口已更新：`temporalresidualkvquant/README.md` 和 `docs/getting_started.md`。
 
 ### 历史状态
 
@@ -78,11 +78,11 @@
   - 更新 `aggregate_results.py` 支持新实验标签
 - **拷贝 Focused-Forcing 参考代码与 DMD loss 数据**（2026-05-17）：
   - 将 `/data2/moweile-20251213/workspace/focused-forcing-code` 拷贝到 `external/focused-forcing-code/`
-  - 新增 `external/README.md`，明确 `external/` 用于存放外部参考代码和分析结果，`HeadWiseKVQuant/` 继续作为主方法代码库
+  - 新增 `external/README.md`，明确 `external/` 用于存放外部参考代码和分析结果，`temporalresidualkvquant/` 继续作为主方法代码库
   - 确认 `focusedforcing_sf/cf/rf/longlive/dm_loss.json` 均包含 360 个 global head 的 DMD loss 分数，可用于生成 top-k policy
 - **新增每周实验汇报目录**（2026-05-17）：
-  - 新增 `HeadWiseKVQuant/weekly_reports/README.md`，规范每周汇报的命名、结构和维护方式
-  - 新增 `HeadWiseKVQuant/weekly_reports/2026-W20.md`，整理本周六条实验线、两阶段 head importance 进展、问题和下周计划，方便和老师同步并请老师指导方向
+  - 新增 `temporalresidualkvquant/weekly_reports/README.md`，规范每周汇报的命名、结构和维护方式
+  - 新增 `temporalresidualkvquant/weekly_reports/2026-W20.md`，整理本周六条实验线、两阶段 head importance 进展、问题和下周计划，方便和老师同步并请老师指导方向
 - **补充两条 packed-naive R-HWQ-4h 实验及 VBench 评估**（2026-05-17）：
   - 跑通两条新实验线：
     | 实验线 | 配置 | 最终得分 | vs BF16 |
@@ -128,15 +128,15 @@
     - `scripts/self_forcing/run_head_importance_analysis.sh` 一键生成 `assets/head_importance/top4_dmd_loss.json`
   - `CausalInferencePipeline` 新增 `headwise_mode=topk`，量化每层 KV cache 时按 `layer_idx` 使用对应 top-k high-precision heads
   - packed-naive launcher 支持 `HEADWISE_MODE=topk`、`HEAD_IMPORTANCE_PATH`、`HEAD_IMPORTANCE_SCORE_DIRECTION`
-  - 新增脚本：`HeadWiseKVQuant/scripts/self_forcing/run_packed_naive_topk_hwq.sh`
-  - 新增聚合脚本：`HeadWiseKVQuant/scripts/aggregate_head_importance.py`，作为 `hwq.head_importance` 的 CLI wrapper，可把 focused-forcing ablation JSON 聚合成 top-k policy JSON
-  - 新增文档：`HeadWiseKVQuant/docs/head_importance_topk.md`，包含跨机器路径处理和运行命令
+  - 新增脚本：`temporalresidualkvquant/scripts/self_forcing/run_packed_naive_topk_hwq.sh`
+  - 新增聚合脚本：`temporalresidualkvquant/scripts/aggregate_head_importance.py`，作为 `hwq.head_importance` 的 CLI wrapper，可把 focused-forcing ablation JSON 聚合成 top-k policy JSON
+  - 新增文档：`temporalresidualkvquant/docs/head_importance_topk.md`，包含跨机器路径处理和运行命令
   - 已通过 `py_compile`、`bash -n`、聚合脚本 smoke test、11 个单测
 - **新增 packed-naive real-compression 支路**（2026-05-11）：
   - 新增 quant types：`packed-naive-int2`、`packed-naive-int4`、`packed-naive-int8`
   - 区别于旧 `naive-int2/int4` fake quant，packed-naive 会存储 uint8 packed codes + per-block min/scale metadata
   - 解压路径已接入 `uncompress_single_cache()`，head-wise mixed groups 可直接复用
-  - 新增脚本：`HeadWiseKVQuant/scripts/self_forcing/run_packed_naive_hwq.sh`
+  - 新增脚本：`temporalresidualkvquant/scripts/self_forcing/run_packed_naive_hwq.sh`
   - 已通过 `py_compile`、`bash -n`、5 个单测和 `packed-naive-int8` smoke test
 - **R-HWQ-4h naive int2/int4 跑通**（2026-05-10）：
   - 配置：4 high-precision heads (naive-int4) + 8 low-precision heads (naive-int2)，block_size=64
@@ -152,11 +152,11 @@
 - **修复 A100 兼容性**：
   - `fp8e4nv` 自动回退：`quant_pack.py` 新增 `_gpu_supports_fp8e4nv()`，非 Hopper GPU 自动降级 bf16
   - 视频保存：`inference.py` 从已废弃的 `torchvision.io.write_video` 切到 `imageio.mimsave`
-- 从 `QVG` 的 `quant_videogen` 中抽出可复用量化核心，现已统一到独立库 `HeadWiseKVQuant/src/trq/`。
+- 从 `QVG` 的 `quant_videogen` 中抽出可复用量化核心，现已统一到独立库 `temporalresidualkvquant/src/trq/`。
 - 新增 `hwq.headwise`：`RandomHeadPolicy`、`compress_headwise_kv_cache`。
 - 新增 `hwq.self_forcing`：`compress_self_forcing_cache_span`。
 - 已通过：`py_compile`、`python -m unittest discover -s tests -v`。
-- 实验产物目录统一为 `HeadWiseKVQuant/results/`（替代 `outputs/`）。
+- 实验产物目录统一为 `temporalresidualkvquant/results/`（替代 `outputs/`）。
 - **引入 external focused-forcing-code + 产出完整 top-k policy**（2026-05-17）：
   - Pull 入 `external/focused-forcing-code/`，包含上游 4 份 DMD loss JSON（cf/sf/rf/longlive，360 heads 各一份，内容相同）
   - 用 `scripts/aggregate_head_importance.py` 直接将 `focusedforcing_sf/dm_loss.json` 聚合成 top-4 policy

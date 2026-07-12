@@ -6,7 +6,7 @@ Self-Forcing 冒烟、TRQ 视频生成、诊断实验和结果记录。
 ## 1. 先确认你在主方法库
 
 ```bash
-cd /path/to/videoquant-trq/HeadWiseKVQuant
+cd /path/to/videoquant-trq/temporalresidualkvquant
 git status --short --branch
 ```
 
@@ -53,7 +53,7 @@ python -m pip install -e '.[analysis]'
 
 ```bash
 which python
-python -m pip show headwise-kv-quant
+python -m pip show temporal-residual-kv-quant
 python -c 'import trq; print(trq.__file__)'
 ```
 

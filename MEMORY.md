@@ -6,14 +6,14 @@
 - 这是一个面向长视频自回归 diffusion 生成的研究项目工作区。
 - 项目目标：研究 KV cache quantization，尽量在显著压缩历史 KV 显存占用的同时，保持长时视频质量，重点关注 `identity consistency`、`scene consistency` 和 `motion continuity`。
 - 当前可见子目录：
-  - `HeadWiseKVQuant` — 论文方法主代码库（head-wise KV cache quantization）
+  - `temporalresidualkvquant` — 论文方法主代码库（head-wise KV cache quantization）
   - `forcing` — 上游模型和 VBench 评估代码
   - `Quant-VideoGen` — QVG 原始实验仓（保留作参考）
 
 ## Worktree 隔离布局
 
 - 当前本机主仓库：`/Users/moweile/Code/LAB/videoquant-trq`。
-- 当前残差量化唯一稳定实现：`HeadWiseKVQuant/src/trq/real/trq.py`；Python 包名为 `trq`。
+- 当前残差量化唯一稳定实现：`temporalresidualkvquant/src/trq/real/trq.py`；Python 包名为 `trq`。
 - `hrq-*` / `s2pp-*` 是兼容别名；QVG 与学弟的 `qvg` 仓库保留作参考。
 - RoPE predictor 尚未进入稳定 codec，需后续独立实验决定。
 
@@ -87,8 +87,8 @@
 - 训练、推理、评测、批处理等长任务，默认通过 Slurm 运行。
 - 登录节点只做编辑、查看日志、提交作业、短时间调试。
 - 正式任务尽量记录：脚本路径、环境名、资源申请、日志路径、输出路径、`jobid`。
-- `videoquant` 相关 Slurm 日志与实验输出不一定落在当前 worktree，可能落在共享盘运行副本或 `HeadWiseKVQuant/results/` 下；查实验结果时需要同时检查运行脚本里的 `OUTPUT_FOLDER`。
-- 后续如果实验结果或 Slurm 日志先输出到共享盘运行副本，默认同步一份回当前方向对应的 `videoquant-*` worktree 或 `HeadWiseKVQuant/results/` 记录目录，避免结果只留在临时运行副本。
+- `videoquant` 相关 Slurm 日志与实验输出不一定落在当前 worktree，可能落在共享盘运行副本或 `temporalresidualkvquant/results/` 下；查实验结果时需要同时检查运行脚本里的 `OUTPUT_FOLDER`。
+- 后续如果实验结果或 Slurm 日志先输出到共享盘运行副本，默认同步一份回当前方向对应的 `videoquant-*` worktree 或 `temporalresidualkvquant/results/` 记录目录，避免结果只留在临时运行副本。
 
 ## Slurm 与服务器规则
 

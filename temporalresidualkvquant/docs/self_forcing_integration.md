@@ -53,19 +53,19 @@ This keeps the video model repository responsible for inference scheduling and
 keeps this repository responsible for quantization policy, compression metadata,
 and decompression.
 
-## Running From HeadWiseKVQuant
+## Running From temporalresidualkvquant
 
 The main launcher is:
 
 ```bash
-cd /path/to/videoquant/HeadWiseKVQuant
+cd /path/to/videoquant/temporalresidualkvquant
 bash scripts/self_forcing/run_random_hwq.sh
 ```
 
 The script uses the vendored backend by default:
 
 ```text
-HeadWiseKVQuant/
+temporalresidualkvquant/
 ├── src/trq/
 ├── backends/self_forcing/
 ├── scripts/self_forcing/
@@ -75,7 +75,7 @@ HeadWiseKVQuant/
 Large checkpoints are intentionally not copied into git.  Put them at:
 
 ```text
-HeadWiseKVQuant/ckpts/Self-Forcing/
+temporalresidualkvquant/ckpts/Self-Forcing/
 ```
 
 or point to an existing checkpoint directory:
@@ -92,7 +92,7 @@ PYTHONPATH="${HWQ_ROOT}/src:${HWQ_ROOT}/backends/self_forcing"
 SELF_FORCING_CKPT_ROOT="${CKPT_ROOT}"
 ```
 
-This makes `HeadWiseKVQuant` self-contained for code development.  The only
+This makes `temporalresidualkvquant` self-contained for code development.  The only
 external runtime dependency is the checkpoint directory.
 
 Recommended first experiment order:

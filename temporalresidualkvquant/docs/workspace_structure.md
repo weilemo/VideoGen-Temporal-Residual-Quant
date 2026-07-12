@@ -1,6 +1,6 @@
 # Workspace Structure
 
-`HeadWiseKVQuant` is the active method workspace inside the local
+`temporalresidualkvquant` is the active method workspace inside the local
 `videoquant-trq` repository.
 
 ## Current Local Layout
@@ -14,7 +14,7 @@
 
 ```text
 videoquant-trq/
-├── HeadWiseKVQuant/
+├── temporalresidualkvquant/
 │   ├── src/trq/                  # paper-facing quantization method
 │   ├── backends/self_forcing/    # vendored Self-Forcing model and pipeline
 │   ├── scripts/self_forcing/     # experiment launchers
@@ -29,17 +29,17 @@ videoquant-trq/
 
 The split is intentional:
 
-- `HeadWiseKVQuant` owns head-wise quantization research code.
-- `HeadWiseKVQuant/backends/self_forcing` owns the active Self-Forcing backend used by HWQ launchers.
+- `temporalresidualkvquant` owns head-wise quantization research code.
+- `temporalresidualkvquant/backends/self_forcing` owns the active Self-Forcing backend used by HWQ launchers.
 - `Quant-VideoGen` is retained as original source/reference.
 - QVG's original `quant_videogen` package is kept for reference and baseline comparison.
-- New head-wise policies should be added under `HeadWiseKVQuant/src/trq/`, not under `Quant-VideoGen/quant_videogen/`.
+- New head-wise policies should be added under `temporalresidualkvquant/src/trq/`, not under `Quant-VideoGen/quant_videogen/`.
 - Temporal residual quantization is owned by `src/trq/real/trq.py`. Within the
   active HWQ package, `real/hrq.py` and `real/s2pp.py` are compatibility
   adapters only. QVG's original S2++ stays reference-only; do not develop a
   second active codec implementation under either legacy name.
 
-Run the CPU smoke test from `HeadWiseKVQuant` first:
+Run the CPU smoke test from `temporalresidualkvquant` first:
 
 ```bash
 python -m pip install -e .
@@ -50,7 +50,7 @@ Then follow [`getting_started.md`](getting_started.md) for Self-Forcing BF16
 and TRQ generation.
 
 Use `SELF_FORCING_CKPT_ROOT` when checkpoints are not under
-`HeadWiseKVQuant/ckpts/Self-Forcing`:
+`temporalresidualkvquant/ckpts/Self-Forcing`:
 
 ```bash
 SELF_FORCING_CKPT_ROOT=/mnt/workspace/caipeiliang/code/moweile/videoquant/Quant-VideoGen/ckpts/Self-Forcing \

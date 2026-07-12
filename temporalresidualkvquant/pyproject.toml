@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "headwise-kv-quant"
+name = "temporal-residual-kv-quant"
 version = "0.1.0"
 description = "Modular low-bit KV-cache quantization and head-wise mixed precision for video generation"
 requires-python = ">=3.10"

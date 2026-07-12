@@ -1,4 +1,4 @@
-"""Public API for HeadWiseKVQuant.
+"""Public API for temporalresidualkvquant.
 
 Heavy GPU modules are imported lazily so the CPU reference codecs and config
 objects remain usable in environments without Triton.

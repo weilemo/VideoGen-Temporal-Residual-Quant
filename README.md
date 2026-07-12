@@ -6,16 +6,16 @@
 
 ## 给协作者的代码入口
 
-实际方法代码在 `HeadWiseKVQuant/`。第一次使用请按下面顺序阅读：
+实际方法代码在 `temporalresidualkvquant/`。第一次使用请按下面顺序阅读：
 
-1. [HeadWiseKVQuant/README.md](HeadWiseKVQuant/README.md)：当前框架、稳定边界和快速命令。
-2. [HeadWiseKVQuant/docs/getting_started.md](HeadWiseKVQuant/docs/getting_started.md)：环境、生成实验、诊断、评估和排错。
-3. [HeadWiseKVQuant/docs/trq_unification.md](HeadWiseKVQuant/docs/trq_unification.md)：TRQ codec contract 与历史兼容关系。
+1. [temporalresidualkvquant/README.md](temporalresidualkvquant/README.md)：当前框架、稳定边界和快速命令。
+2. [temporalresidualkvquant/docs/getting_started.md](temporalresidualkvquant/docs/getting_started.md)：环境、生成实验、诊断、评估和排错。
+3. [temporalresidualkvquant/docs/trq_unification.md](temporalresidualkvquant/docs/trq_unification.md)：TRQ codec contract 与历史兼容关系。
 
 最小验证：
 
 ```bash
-cd HeadWiseKVQuant
+cd temporalresidualkvquant
 python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
@@ -25,7 +25,7 @@ python -m unittest discover -s tests -v
 ```text
 /Users/moweile/Code/LAB/
   videoquant-trq/      # 当前统一后的主仓库
-    HeadWiseKVQuant/   # 方法、策略、codec 与 Self-Forcing 集成
+    temporalresidualkvquant/   # 方法、策略、codec 与 Self-Forcing 集成
     Quant-VideoGen/    # 原始 QVG 参考实现
   qvg/                 # 学弟仓库，保留作算法参考
 ```

@@ -40,29 +40,29 @@
   - 压缩后元数据携带 group 配置
   - 解压时按 group 重建 `[B, H, S, D]`
 
-## D-2026-05-08-07 独立出 `HeadWiseKVQuant` 作为论文方法代码库
+## D-2026-05-08-07 独立出 `temporalresidualkvquant` 作为论文方法代码库
 
-- 决策：从 `Quant-VideoGen` 中抽出 KV cache 低精度量化框架，建立独立代码库 `/mnt/workspace/caipeiliang/code/moweile/videoquant-main/HeadWiseKVQuant`。
+- 决策：从 `Quant-VideoGen` 中抽出 KV cache 低精度量化框架，建立独立代码库 `/mnt/workspace/caipeiliang/code/moweile/videoquant-main/temporalresidualkvquant`。
 - 原因：后续论文方法不应长期绑在 QVG 实验仓里；独立库更适合作为 `head-wise quant` 方法主体，便于模块化、复现实验和后续开源整理。
-- 影响：后续方法开发优先发生在当前统一目录 `HeadWiseKVQuant/src/trq/`（原 `src/hwq/`）；`Quant-VideoGen` 的 `Self-Forcing` 代码应逐步退化为下游调用方，只负责推理调度和实验输出。
+- 影响：后续方法开发优先发生在当前统一目录 `temporalresidualkvquant/src/trq/`（原 `src/hwq/`）；`Quant-VideoGen` 的 `Self-Forcing` 代码应逐步退化为下游调用方，只负责推理调度和实验输出。
 
 ## D-2026-05-08-08 `Quant-VideoGen` 作为下游集成入口调用 `hwq`
 
-- 决策：`Quant-VideoGen/experiments/Self-Forcing` 不再维护独立的 head-wise 量化实现，统一从 `HeadWiseKVQuant` 的 `hwq` 包导入缓存、压缩、解压和随机 head-group policy。
-- 原因：避免同一研究逻辑在 QVG 实验仓和独立方法库中分叉；后续新增 importance-based / 多组策略时，只需要优先改 `HeadWiseKVQuant`。
-- 影响：运行 QVG Self-Forcing 脚本时需要让 Python 找到独立库，例如从 `Quant-VideoGen` 目录运行时使用 `PYTHONPATH=../HeadWiseKVQuant/src:experiments/Self-Forcing:.`。
+- 决策：`Quant-VideoGen/experiments/Self-Forcing` 不再维护独立的 head-wise 量化实现，统一从 `temporalresidualkvquant` 的 `hwq` 包导入缓存、压缩、解压和随机 head-group policy。
+- 原因：避免同一研究逻辑在 QVG 实验仓和独立方法库中分叉；后续新增 importance-based / 多组策略时，只需要优先改 `temporalresidualkvquant`。
+- 影响：运行 QVG Self-Forcing 脚本时需要让 Python 找到独立库，例如从 `Quant-VideoGen` 目录运行时使用 `PYTHONPATH=../temporalresidualkvquant/src:experiments/Self-Forcing:.`。
 
-## D-2026-05-08-09 `HeadWiseKVQuant` 作为实验主工作区
+## D-2026-05-08-09 `temporalresidualkvquant` 作为实验主工作区
 
-- 决策：后续默认从 `HeadWiseKVQuant` 启动 Self-Forcing 实验。
+- 决策：后续默认从 `temporalresidualkvquant` 启动 Self-Forcing 实验。
 - 原因：研究主线应围绕 head-wise quant 方法库展开；从方法仓启动实验更符合论文代码组织，也减少“主工作区还在 QVG”带来的概念混乱。
-- 影响：新增 `HeadWiseKVQuant/scripts/self_forcing/`；最初可指向外部 QVG backend，后续由 D-2026-05-08-10 升级为默认调用本仓库 vendored backend。
+- 影响：新增 `temporalresidualkvquant/scripts/self_forcing/`；最初可指向外部 QVG backend，后续由 D-2026-05-08-10 升级为默认调用本仓库 vendored backend。
 
-## D-2026-05-08-10 Vendored Self-Forcing backend 进入 `HeadWiseKVQuant`
+## D-2026-05-08-10 Vendored Self-Forcing backend 进入 `temporalresidualkvquant`
 
-- 决策：将 `Quant-VideoGen/experiments/Self-Forcing` 的模型和 pipeline 代码复制到 `HeadWiseKVQuant/backends/self_forcing/`，使 `HeadWiseKVQuant` 自身成为可继续开发的完整代码工作区。
-- 原因：如果未来只保留或只 clone `HeadWiseKVQuant`，仍应能继续修改 Self-Forcing pipeline 和 head-wise quant 接入，不应依赖旁边必须存在 `Quant-VideoGen` 代码目录。
-- 影响：运行脚本默认调用 vendored backend；大模型权重不入库，默认放 `HeadWiseKVQuant/ckpts/Self-Forcing/`，或通过 `SELF_FORCING_CKPT_ROOT` 指向共享权重目录。
+- 决策：将 `Quant-VideoGen/experiments/Self-Forcing` 的模型和 pipeline 代码复制到 `temporalresidualkvquant/backends/self_forcing/`，使 `temporalresidualkvquant` 自身成为可继续开发的完整代码工作区。
+- 原因：如果未来只保留或只 clone `temporalresidualkvquant`，仍应能继续修改 Self-Forcing pipeline 和 head-wise quant 接入，不应依赖旁边必须存在 `Quant-VideoGen` 代码目录。
+- 影响：运行脚本默认调用 vendored backend；大模型权重不入库，默认放 `temporalresidualkvquant/ckpts/Self-Forcing/`，或通过 `SELF_FORCING_CKPT_ROOT` 指向共享权重目录。
 
 ## D-2026-05-11-11 新增 `packed-naive-int2/int4/int8` 作为 real-compression baseline
 
@@ -90,9 +90,9 @@
 - policy 文件格式：
   - 首选 JSON，支持 `top_heads_by_layer` / `scores_by_layer` / `scores` / `global_scores`
   - 也支持 CSV/TXT：`global_head_id,score` 或 `layer,head,score`
-- 影响：运行时通过 `HEADWISE_MODE=topk` 和 `HEAD_IMPORTANCE_PATH` 启用；从 focused-forcing DMD loss JSON 生成 policy 时使用 `HeadWiseKVQuant/scripts/aggregate_head_importance.py`。
-- 进一步约定：选头逻辑属于方法库本身，当前路径为 `HeadWiseKVQuant/src/trq/head_importance.py`；`scripts/aggregate_head_importance.py` 只是 CLI wrapper，避免选头逻辑散落在实验脚本中。
-- 进一步约定：head ablation / DMD-loss calibration 也属于 `HeadWiseKVQuant` 的 vendored Self-Forcing backend；外部 `focused-forcing-code` 只作为算法参考，不作为运行时依赖。
+- 影响：运行时通过 `HEADWISE_MODE=topk` 和 `HEAD_IMPORTANCE_PATH` 启用；从 focused-forcing DMD loss JSON 生成 policy 时使用 `temporalresidualkvquant/scripts/aggregate_head_importance.py`。
+- 进一步约定：选头逻辑属于方法库本身，当前路径为 `temporalresidualkvquant/src/trq/head_importance.py`；`scripts/aggregate_head_importance.py` 只是 CLI wrapper，避免选头逻辑散落在实验脚本中。
+- 进一步约定：head ablation / DMD-loss calibration 也属于 `temporalresidualkvquant` 的 vendored Self-Forcing backend；外部 `focused-forcing-code` 只作为算法参考，不作为运行时依赖。
 
 ## D-2026-05-17-13 VBench 评估确认 6 条实验线的量化质量排序
 
@@ -112,4 +112,4 @@
   - `/mnt/workspace/caipeiliang/code/moweile/videoquant-online` → `hwq_online_calibration`
   - `/mnt/workspace/caipeiliang/code/moweile/videoquant-hrq` → `feature/hwq-residual-quant`
 - 影响：后续任务必须先进入对应 `videoquant-*` 目录；原目录只用于 `git worktree list`、`git branch -vv`、`git worktree add/remove/prune`。
-- 进一步约定：实验结果、`HeadWiseKVQuant/tmp/`、Mac `._*` 文件和 docs PDF 通过本地 exclude 排除，不进入方法分支。
+- 进一步约定：实验结果、`temporalresidualkvquant/tmp/`、Mac `._*` 文件和 docs PDF 通过本地 exclude 排除，不进入方法分支。

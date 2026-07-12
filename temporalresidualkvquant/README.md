@@ -32,7 +32,7 @@ PRQ、packed-naive 和 head-wise Top-K 仍作为对照方法保留，但新残�
 ## 仓库结构
 
 ```text
-HeadWiseKVQuant/
+temporalresidualkvquant/
 ├── src/trq/                  # 量化包；TRQ、PRQ、head-wise policy、cache
 │   ├── real/trq.py           # TRQ v1 唯一稳定 codec
 │   ├── real/hrq.py           # 历史 HRQ 兼容适配
