@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+import re
 
 import imageio.v3 as iio
 import numpy as np
@@ -40,6 +41,16 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-frames", type=int, default=0)
     ap.add_argument("--device", default="cuda")
+    ap.add_argument(
+        "--match-by-index",
+        action="store_true",
+        help="Pair names by leading prompt/sample indices, accepting both 0-0 and 0_0 forms",
+    )
+    ap.add_argument(
+        "--strict-shape",
+        action="store_true",
+        help="Fail when paired videos have different frame counts or frame shapes",
+    )
     args = ap.parse_args()
 
     ref_dir = Path(args.ref_dir)
@@ -54,13 +65,32 @@ def main():
         lpips_model = lpips.LPIPS(net="alex").to(device).eval()
 
     rows = []
-    for ref in sorted(ref_dir.glob("*.mp4"), key=lambda p: int(p.name.split("-")[0])):
-        idx = int(ref.name.split("-")[0])
-        cmp = cmp_dir / ref.name
-        if not cmp.exists():
-            raise FileNotFoundError(f"missing cmp for {ref.name}: {cmp}")
+    ref_videos = list(ref_dir.glob("*.mp4"))
+    cmp_videos = list(cmp_dir.glob("*.mp4"))
+    if args.match_by_index:
+        ref_map = video_index_map(ref_videos)
+        cmp_map = video_index_map(cmp_videos)
+        missing = sorted(set(ref_map).difference(cmp_map))
+        if missing:
+            raise FileNotFoundError(f"comparison directory is missing video indices: {missing}")
+        pairs = [(key, ref_map[key], cmp_map[key]) for key in sorted(ref_map)]
+    else:
+        pairs = []
+        for ref in sorted(ref_videos, key=lambda p: int(p.name.split("-")[0])):
+            idx = int(ref.name.split("-")[0])
+            cmp = cmp_dir / ref.name
+            if not cmp.exists():
+                raise FileNotFoundError(f"missing cmp for {ref.name}: {cmp}")
+            pairs.append(((idx, 0), ref, cmp))
+
+    for (idx, sample_idx), ref, cmp in pairs:
         a = read_video(ref, max_frames=max_frames)
         b = read_video(cmp, max_frames=max_frames)
+        if args.strict_shape and a.shape != b.shape:
+            raise ValueError(
+                f"paired video shapes differ for index {(idx, sample_idx)}: "
+                f"{ref.name}={a.shape}, {cmp.name}={b.shape}"
+            )
         n = min(len(a), len(b))
         a = a[:n]
         b = b[:n]
@@ -75,7 +105,16 @@ def main():
                     tb = torch.from_numpy(b[i]).permute(2,0,1).float().unsqueeze(0) / 127.5 - 1.0
                     vals.append(float(lpips_model(ta.to(device), tb.to(device)).item()))
             cur_lpips = float(np.mean(vals))
-        rows.append({"idx": idx, "frames": n, "psnr": cur_psnr, "ssim": cur_ssim, "lpips": cur_lpips})
+        rows.append({
+            "idx": idx,
+            "sample_idx": sample_idx,
+            "ref_name": ref.name,
+            "cmp_name": cmp.name,
+            "frames": n,
+            "psnr": cur_psnr,
+            "ssim": cur_ssim,
+            "lpips": cur_lpips,
+        })
 
     summary = {
         "ref_dir": str(ref_dir),
@@ -90,6 +129,19 @@ def main():
     }
     out.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     print(json.dumps({k: v for k, v in summary.items() if k != "per_video"}, indent=2))
+
+
+def video_index_map(paths):
+    result = {}
+    for path in paths:
+        match = re.match(r"^(\d+)[-_](\d+)", path.name)
+        if match is None:
+            raise ValueError(f"cannot extract prompt/sample indices from video name: {path.name}")
+        key = (int(match.group(1)), int(match.group(2)))
+        if key in result:
+            raise ValueError(f"duplicate video index {key}: {result[key].name}, {path.name}")
+        result[key] = path
+    return result
 
 if __name__ == "__main__":
     main()

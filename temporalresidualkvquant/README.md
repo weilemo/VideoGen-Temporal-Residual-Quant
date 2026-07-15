@@ -7,6 +7,8 @@
 如果你是第一次接手，先读本文并跑通 CPU 测试，再看
 [上手与实验指南](docs/getting_started.md)。
 
+新机器从零配置请直接看 [新机器初始化](docs/new_machine_setup.md)。
+
 ## 当前稳定范围
 
 TRQ v1 的输入布局是 `[B, H, S, D]`，链式重建过程为：
@@ -167,9 +169,11 @@ LAYERS=0,5,11,17,23,29 \
 
 ## 文档索引
 
+- [新机器初始化](docs/new_machine_setup.md)：Miniconda、clone、依赖和 GPU 验证
 - [上手与实验指南](docs/getting_started.md)：交给新同学的完整操作手册
 - [TRQ 统一设计](docs/trq_unification.md)：稳定边界、兼容层和准入条件
 - [TRQ 诊断实验](docs/trq_diagnostic_experiments.md)：分布图和 chain drift 协议
+- [Identity 差异定位](docs/identity_parity_experiments.md)：同输入 codec parity 与跨库在线矩阵
 - [量化方案对比](docs/quantization_approaches.md)：naive、packed-naive、PRQ、TRQ
 - [Self-Forcing 集成](docs/self_forcing_integration.md)：缓存布局与调用路径
 - [Checkpoint 配置](docs/checkpoint_sync.md)：权重目录与跨机器设置

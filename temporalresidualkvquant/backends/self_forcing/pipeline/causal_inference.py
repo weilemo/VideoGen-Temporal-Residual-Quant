@@ -160,6 +160,18 @@ class CausalInferencePipeline(torch.nn.Module):
 
         do_offload = getattr(self.quant_config, "kv_cache_cpu_offload", False)
         cuda_device = torch.device("cuda")
+        parity_capture_dir = os.getenv("TRQ_PARITY_CAPTURE_DIR", "").strip()
+        capture_first_event = bool(parity_capture_dir) and not getattr(
+            self, "_trq_parity_first_event_captured", False
+        )
+        capture_layers = set()
+        if capture_first_event:
+            from trq.analysis.online_snapshot import parse_capture_layers
+
+            capture_layers = parse_capture_layers(
+                os.getenv("TRQ_PARITY_CAPTURE_LAYERS", "0"), len(self.kv_cache1)
+            )
+        captured_paths = []
 
         with torch.no_grad():
             quantize_fn = None
@@ -190,6 +202,32 @@ class CausalInferencePipeline(torch.nn.Module):
 
                 self._print_kv_cache_mse_error(k, k_quant, v, v_quant, layer_idx)
 
+                if capture_first_event and layer_idx in capture_layers:
+                    from trq.analysis.online_snapshot import save_online_snapshot
+
+                    if isinstance(k_quant, dict) and isinstance(v_quant, dict):
+                        decoded_k, decoded_v = uncompress_kv_cache(k_quant, v_quant)
+                    else:
+                        decoded_k, decoded_v = k_quant, v_quant
+                    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+                    snapshot_path = save_online_snapshot(
+                        parity_capture_dir,
+                        layer_idx=layer_idx,
+                        raw_k=k,
+                        raw_v=v,
+                        decoded_k=decoded_k,
+                        decoded_v=decoded_v,
+                        encoded_k=k_quant,
+                        encoded_v=v_quant,
+                        tokens_start=tokens_to_quantize_start,
+                        tokens_end=tokens_to_quantize_end,
+                        max_tokens=max_tokens_to_quantize,
+                        quant_config=self.quant_config,
+                        rank=rank,
+                    )
+                    captured_paths.append(snapshot_path)
+                    cprint(f"Saved first-event parity snapshot: {snapshot_path}", "light_cyan")
+
                 # Pack decompression metadata for real-quantized dicts
                 if self.headwise_policy is None and isinstance(k_quant, dict) and isinstance(v_quant, dict):
                     k_quant, v_quant = self._pack_info_into_kv_cache(
@@ -206,6 +244,9 @@ class CausalInferencePipeline(torch.nn.Module):
 
                 if do_offload:
                     offload_kv_cache_layer(layer)
+
+        if captured_paths:
+            self._trq_parity_first_event_captured = True
 
         end_time.record()
         torch.cuda.synchronize()

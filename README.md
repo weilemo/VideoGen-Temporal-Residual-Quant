@@ -8,9 +8,10 @@
 
 实际方法代码在 `temporalresidualkvquant/`。第一次使用请按下面顺序阅读：
 
-1. [temporalresidualkvquant/README.md](temporalresidualkvquant/README.md)：当前框架、稳定边界和快速命令。
-2. [temporalresidualkvquant/docs/getting_started.md](temporalresidualkvquant/docs/getting_started.md)：环境、生成实验、诊断、评估和排错。
-3. [temporalresidualkvquant/docs/trq_unification.md](temporalresidualkvquant/docs/trq_unification.md)：TRQ codec contract 与历史兼容关系。
+1. [新机器初始化](temporalresidualkvquant/docs/new_machine_setup.md)：Miniconda、clone、依赖与 GPU 验证。
+2. [temporalresidualkvquant/README.md](temporalresidualkvquant/README.md)：当前框架、稳定边界和快速命令。
+3. [temporalresidualkvquant/docs/getting_started.md](temporalresidualkvquant/docs/getting_started.md)：生成实验、诊断、评估和排错。
+4. [temporalresidualkvquant/docs/trq_unification.md](temporalresidualkvquant/docs/trq_unification.md)：TRQ codec contract 与历史兼容关系。
 
 最小验证：
 

@@ -196,6 +196,10 @@ RESET_INTERVALS=1,2,4,8,24,none \
 级，先选择层，再决定是否扩大 prompt 数。统计定义见
 [trq_diagnostic_experiments.md](trq_diagnostic_experiments.md)。
 
+如果 TRQ identity 与 QVG S2++ identity 的生成效果不一致，先按
+[Identity 差异定位实验](identity_parity_experiments.md) 跑同输入 codec parity 和
+`实现 × 配置` 在线矩阵，不要直接用 VBench 总分猜测原因。
+
 ## 7. 评估与记录
 
 正式比较至少包含：

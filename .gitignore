@@ -13,6 +13,8 @@ checkpoints/
 runs/
 temporalresidualkvquant/ckpts/
 temporalresidualkvquant/outputs/
+temporalresidualkvquant/results/
+temporalresidualkvquant/kv_dumps/
 
 *.pt
 *.pth

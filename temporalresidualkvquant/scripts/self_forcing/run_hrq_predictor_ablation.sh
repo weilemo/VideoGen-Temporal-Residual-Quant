@@ -11,7 +11,9 @@
 # Env overrides:
 #   HEADWISE_MODE, HEAD_IMPORTANCE_PATH, NUM_HIGH_PRECISION_HEADS,
 #   HIGH_PRECISION_QUANT_TYPE, LOW_PRECISION_QUANT_TYPE, QUANT_BLOCK_SIZE,
-#   NUM_OUTPUT_FRAMES, LOCAL_ATTN_SIZE, PROMPTS_PATH
+#   TRQ_BITS, TRQ_GROUP_SIZE, TRQ_ANCHOR_BITS, TRQ_PREDICTOR_STRIDE,
+#   TRQ_SCALE_PRECISION, TRQ_RESIDUAL_QUANT_MODE, TRQ_K_BITS, TRQ_V_BITS,
+#   NUM_OUTPUT_FRAMES, LOCAL_ATTN_SIZE, PROMPTS_PATH, OUTPUT_FOLDER, SEED
 #   TRQ_PREDICTOR_PARAMS_DIR  (default: assets/trq_predictors)
 
 set -euo pipefail
@@ -36,6 +38,15 @@ num_hp_heads="${NUM_HIGH_PRECISION_HEADS:-8}"
 hp_quant="${HIGH_PRECISION_QUANT_TYPE:-trq-int4}"
 lp_quant="${LOW_PRECISION_QUANT_TYPE:-trq-int2}"
 block_size="${QUANT_BLOCK_SIZE:-64}"
+trq_bits="${TRQ_BITS:-2}"
+trq_group_size="${TRQ_GROUP_SIZE:-${block_size}}"
+trq_anchor_bits="${TRQ_ANCHOR_BITS:-4}"
+trq_predictor_stride="${TRQ_PREDICTOR_STRIDE:-1560}"
+trq_scale_precision="${TRQ_SCALE_PRECISION:-bf16}"
+trq_residual_quant_mode="${TRQ_RESIDUAL_QUANT_MODE:-asym_zero_point}"
+trq_k_bits="${TRQ_K_BITS:-0}"
+trq_v_bits="${TRQ_V_BITS:-0}"
+seed="${SEED:-0}"
 num_output_frames="${NUM_OUTPUT_FRAMES:-180}"
 local_attn_size="${LOCAL_ATTN_SIZE:-180}"
 prompts_path="${PROMPTS_PATH:-${hwq_root}/tmp/moviegenbench_15.txt}"
@@ -48,7 +59,7 @@ export SELF_FORCING_CKPT_ROOT="${ckpt_root}"
 export TRQ_PREDICTOR_PARAMS_DIR="${predictor_params_dir}"
 export HRQ_PREDICTOR_PARAMS_DIR="${predictor_params_dir}"
 
-results_root="${hwq_root}/results/selfforcing/vbench_eval_trq_predictor"
+results_root="${RESULTS_ROOT:-${hwq_root}/results/selfforcing/vbench_eval_trq_predictor}"
 mkdir -p "${results_root}"
 
 # ── Common inference args ────────────────────────────────────────────
@@ -57,17 +68,20 @@ common_args=(
   --checkpoint_path "${ckpt_path}"
   --data_path "${prompts_path}"
   --num_samples 1
+  --seed "${seed}"
   --num_output_frames "${num_output_frames}"
   --local_attn_size "${local_attn_size}"
   --use_ema
   --save_with_index
-  --quant_type "trq-int2"
+  --quant_type "trq-int${trq_bits}"
   --quant_block_size "${block_size}"
-  --trq_group_size "${block_size}"
-  --trq_anchor_bits 4
-  --trq_predictor_stride 1560
-  --trq_scale_precision bf16
-  --trq_residual_quant_mode asym_zero_point
+  --trq_group_size "${trq_group_size}"
+  --trq_anchor_bits "${trq_anchor_bits}"
+  --trq_predictor_stride "${trq_predictor_stride}"
+  --trq_scale_precision "${trq_scale_precision}"
+  --trq_residual_quant_mode "${trq_residual_quant_mode}"
+  --trq_k_bits "${trq_k_bits}"
+  --trq_v_bits "${trq_v_bits}"
   --headwise_mode "${headwise_mode}"
   --head_importance_path "${head_importance_path}"
   --num_high_precision_heads "${num_hp_heads}"
@@ -78,13 +92,16 @@ common_args=(
 # ── Helper: run one predictor mode ─────────────────────────────────
 run_predictor() {
   local mode="$1"
-  local out_dir="${results_root}/quick15_topk8_${hp_quant}_${lp_quant}_pred_${mode}"
+  local default_name="identity_int${trq_bits}_a${trq_anchor_bits}_g${trq_group_size}_s${trq_predictor_stride}_${mode}"
+  local out_dir="${OUTPUT_FOLDER:-${results_root}/${default_name}}"
   local log_file="${out_dir}.log"
   local pid_file="${out_dir}.pid"
 
   echo ""
   echo "=== Predictor: ${mode} ==="
   echo "Output: ${out_dir}"
+  echo "Resolved TRQ: bits=${trq_bits} anchor=${trq_anchor_bits} group=${trq_group_size} stride=${trq_predictor_stride} scale=${trq_scale_precision} residual=${trq_residual_quant_mode} K/V=${trq_k_bits}/${trq_v_bits}"
+  echo "Runtime: seed=${seed} frames=${num_output_frames} local_attn=${local_attn_size} headwise=${headwise_mode}"
 
   if [ "${mode}" != "identity" ]; then
     params_path="${predictor_params_dir}/${mode}_self_forcing_dmd.pt"

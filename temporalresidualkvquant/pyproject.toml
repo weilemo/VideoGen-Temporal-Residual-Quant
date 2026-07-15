@@ -21,6 +21,9 @@ gpu = [
 ]
 analysis = [
     "matplotlib>=3.8",
+    "imageio>=2.34",
+    "imageio-ffmpeg>=0.5",
+    "scikit-image>=0.22",
 ]
 
 [tool.setuptools.packages.find]

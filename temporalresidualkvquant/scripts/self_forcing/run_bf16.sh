@@ -35,6 +35,7 @@ DUMP_KV_LEVEL="${DUMP_KV_LEVEL:-0}" torchrun --nproc_per_node=1 --standalone "${
   --data_path "${prompts_path}" \
   --output_folder "${output_folder}" \
   --num_samples "${NUM_SAMPLES:-1}" \
+  --seed "${SEED:-0}" \
   --num_output_frames "${num_output_frames}" \
   --local_attn_size "${local_attn_size}" \
   --use_ema \
