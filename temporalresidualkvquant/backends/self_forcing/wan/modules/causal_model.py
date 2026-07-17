@@ -58,7 +58,7 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
 
 
 
-def causal_rope_apply_long_input(x, grid_sizes, freqs):
+def causal_rope_apply_long_input(x, grid_sizes, freqs, start_frame=0):
     """
     Apply causal rope to a long input tensor.
     """
@@ -88,7 +88,7 @@ def causal_rope_apply_long_input(x, grid_sizes, freqs):
                     seq_len, n, -1, 2
                 )
             )
-            chunk_start_frame = chunk_idx * f
+            chunk_start_frame = start_frame + chunk_idx * f
             freqs_i = torch.cat(
                 [
                     freqs[0][chunk_start_frame:chunk_start_frame + f]
@@ -287,7 +287,10 @@ class CausalWanSelfAttention(nn.Module):
         num_new_tokens = roped_query.shape[1]
         if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
                 num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
-            raise ValueError("KV cache size is too small")
+            num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
+            kv_cache["k"].evict_prefix(num_evicted_tokens, sink_tokens=sink_tokens)
+            kv_cache["v"].evict_prefix(num_evicted_tokens, sink_tokens=sink_tokens)
+            kv_cache["local_end_index"].sub_(num_evicted_tokens)
         
         # Assign new keys/values directly up to current_end
         local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
@@ -301,9 +304,22 @@ class CausalWanSelfAttention(nn.Module):
         k_all = kv_cache["k"].read(0, local_end_index)
         v_all = kv_cache["v"].read(0, local_end_index)
 
-        k_input = causal_rope_apply_long_input(
-            k_all, grid_sizes, freqs
-        ).type_as(v)
+        if sink_tokens:
+            sink_k = causal_rope_apply_long_input(
+                k_all[:, :sink_tokens], grid_sizes, freqs, start_frame=0
+            )
+            tail_frames = (local_end_index - sink_tokens) // frame_seqlen
+            tail_start_frame = current_end // frame_seqlen - tail_frames
+            tail_k = causal_rope_apply_long_input(
+                k_all[:, sink_tokens:], grid_sizes, freqs, start_frame=tail_start_frame
+            )
+            k_input = torch.cat([sink_k, tail_k], dim=1).type_as(v)
+        else:
+            local_frames = local_end_index // frame_seqlen
+            local_start_frame = current_end // frame_seqlen - local_frames
+            k_input = causal_rope_apply_long_input(
+                k_all, grid_sizes, freqs, start_frame=local_start_frame
+            ).type_as(v)
 
         x = attention(roped_query, k_input, v_all)
         

@@ -157,6 +157,17 @@ LAYERS=0,5,11,17,23,29 \
 完整协议与输出字段见
 [TRQ 诊断实验](docs/trq_diagnostic_experiments.md)。
 
+在线 trajectory drift 使用同 prompt/seed 的 BF16-A、BF16-B 与 TRQ 三路生成：
+
+```bash
+DRY_RUN=1 bash scripts/analysis/run_online_paired_rollout.sh
+bash scripts/analysis/run_online_paired_rollout.sh
+```
+
+该入口会保存 clean latent、结构化 runtime/cache metrics，并输出 prompt-level
+bootstrap drift 判据。协议见
+[Online Paired Rollout](docs/online_paired_rollout.md)。
+
 ## 结果与评估
 
 - 新实验产物统一写入 `results/`。
@@ -173,6 +184,7 @@ LAYERS=0,5,11,17,23,29 \
 - [上手与实验指南](docs/getting_started.md)：交给新同学的完整操作手册
 - [TRQ 统一设计](docs/trq_unification.md)：稳定边界、兼容层和准入条件
 - [TRQ 诊断实验](docs/trq_diagnostic_experiments.md)：分布图和 chain drift 协议
+- [Online Paired Rollout](docs/online_paired_rollout.md)：BF16 repeat、在线 latent drift 与效率指标
 - [Identity 差异定位](docs/identity_parity_experiments.md)：同输入 codec parity 与跨库在线矩阵
 - [量化方案对比](docs/quantization_approaches.md)：naive、packed-naive、PRQ、TRQ
 - [Self-Forcing 集成](docs/self_forcing_integration.md)：缓存布局与调用路径

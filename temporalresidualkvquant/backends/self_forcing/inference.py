@@ -1,6 +1,9 @@
 import argparse
+import json
 import torch
 import os
+import time
+from pathlib import Path
 from omegaconf import OmegaConf
 from tqdm import tqdm
 from torchvision import transforms
@@ -36,6 +39,9 @@ parser.add_argument("--local_attn_size", type=int, default=-1,
                     help="Sliding-window length used by causal inference (−1 = global attention)")
 parser.add_argument("--save_with_index", action="store_true",
                     help="Whether to save the video using the index or prompt as the filename")
+parser.add_argument("--profile", action="store_true", help="Collect structured runtime and memory metrics")
+parser.add_argument("--save_rollout_latents", action="store_true", help="Save clean rollout latents for paired analysis")
+parser.add_argument("--rollout_metrics_dir", type=str, default="", help="Output root for latent and runtime metric files")
 
 #########################################################
 # Quantization Configuration
@@ -170,6 +176,11 @@ dataloader = DataLoader(dataset, batch_size=1, sampler=sampler, num_workers=0, d
 # Create output directory (only on main process to avoid race conditions)
 if local_rank == 0:
     os.makedirs(args.output_folder, exist_ok=True)
+metrics_root = Path(args.rollout_metrics_dir or os.path.join(args.output_folder, "rollout_metrics"))
+if args.profile or args.save_rollout_latents:
+    (metrics_root / "runtime").mkdir(parents=True, exist_ok=True)
+    if args.save_rollout_latents:
+        (metrics_root / "latents").mkdir(parents=True, exist_ok=True)
 
 if dist.is_initialized():
     dist.barrier()
@@ -230,14 +241,20 @@ for i, batch_data in tqdm(enumerate(dataloader), disable=(local_rank != 0)):
             [args.num_samples, args.num_output_frames, 16, 60, 104], device=device, dtype=torch.bfloat16
         )
 
-    # Generate 81 frames
+    if args.profile:
+        torch.cuda.synchronize()
+    wall_start = time.perf_counter()
     video, latents = pipeline.inference(
         noise=sampled_noise,
         text_prompts=prompts,
         return_latents=True,
         initial_latent=initial_latent,
         low_memory=low_memory,
+        profile=args.profile,
     )
+    if args.profile:
+        torch.cuda.synchronize()
+    wall_time_ms = (time.perf_counter() - wall_start) * 1000.0
     current_video = rearrange(video, 'b t c h w -> b t h w c').cpu()
     all_video.append(current_video)
     num_generated_frames += latents.shape[1]
@@ -252,9 +269,56 @@ for i, batch_data in tqdm(enumerate(dataloader), disable=(local_rank != 0)):
     if idx < num_prompts:
         model = "regular" if not args.use_ema else "ema"
         for seed_idx in range(args.num_samples):
+            artifact_stem = f'{idx}-{seed_idx}_{model}'
+            metadata = {
+                "format": "trq_online_rollout",
+                "version": 1,
+                "prompt_index": int(idx),
+                "prompt": prompt,
+                "seed": int(args.seed),
+                "effective_seed": int(args.seed + local_rank),
+                "sample_index": int(seed_idx),
+                "num_output_frames": int(args.num_output_frames),
+                "local_attn_size": int(args.local_attn_size),
+                "data_path": str(Path(args.data_path).expanduser().resolve()),
+                "config_path": str(Path(args.config_path).expanduser().resolve()),
+                "checkpoint_path": str(Path(args.checkpoint_path).expanduser().resolve()) if args.checkpoint_path else "",
+                "quant_type": str(args.quant_type),
+                "trq_k_bits": int(args.trq_k_bits),
+                "trq_v_bits": int(args.trq_v_bits),
+                "trq_anchor_bits": int(args.trq_anchor_bits),
+                "trq_group_size": int(args.trq_group_size),
+                "trq_predictor_stride": int(args.trq_predictor_stride),
+                "trq_predictor_mode": str(args.trq_predictor_mode),
+                "trq_scale_precision": str(args.trq_scale_precision),
+                "trq_residual_quant_mode": str(args.trq_residual_quant_mode),
+                "torch_version": str(torch.__version__),
+                "cuda_version": str(torch.version.cuda),
+                "gpu_name": str(torch.cuda.get_device_name(device)),
+                "latent_shape": list(latents[seed_idx].shape),
+            }
+            if args.save_rollout_latents:
+                torch.save(
+                    {
+                        "metadata": metadata,
+                        "latents": latents[seed_idx].detach().to(
+                            device="cpu", dtype=torch.bfloat16
+                        ).contiguous(),
+                    },
+                    metrics_root / "latents" / f"{artifact_stem}.pt",
+                )
+            if args.profile:
+                runtime_payload = {
+                    "metadata": metadata,
+                    "wall_time_e2e_ms": float(wall_time_ms),
+                    "pipeline": pipeline.last_runtime_metrics,
+                }
+                with open(metrics_root / "runtime" / f"{artifact_stem}.json", "w", encoding="utf-8") as handle:
+                    json.dump(runtime_payload, handle, indent=2, ensure_ascii=False)
+
             # All processes save their videos
             if args.save_with_index:
-                output_path = os.path.join(args.output_folder, f'{idx}-{seed_idx}_{model}.mp4')
+                output_path = os.path.join(args.output_folder, f'{artifact_stem}.mp4')
             else:
                 output_path = os.path.join(args.output_folder, f'{prompt[:100]}-{seed_idx}.mp4')
 

@@ -23,6 +23,7 @@ from trq import (
     uncompress_kv_cache,
 )
 from trq.analysis.kv_dump import parse_layer_spec
+from trq.runtime_metrics import summarize_cache_profile, summarize_kv_cache
 
 class CausalInferencePipeline(torch.nn.Module):
     def __init__(
@@ -71,6 +72,10 @@ class CausalInferencePipeline(torch.nn.Module):
         self.headwise_policy = self._build_headwise_policy()
 
         self.generator.model.kv_cache_cpu_offload = getattr(self.quant_config, "kv_cache_cpu_offload", False)
+        self.last_runtime_metrics = {}
+        self._profile_runtime = False
+        self._quantize_calls = 0
+        self._quantize_event_pairs = []
 
     def _build_headwise_policy(self):
         mode = getattr(self.quant_config, "headwise_mode", "none")
@@ -146,15 +151,18 @@ class CausalInferencePipeline(torch.nn.Module):
             "light_cyan",
         )
 
-        # Record the time using torch.cuda.Event
+        # Do nothing if quantization type is none
+        if self.quant_config.quant_type == "none":
+            if not self._profile_runtime and os.getenv("TRQ_LEGACY_MEMORY_PROBE", "0") == "1":
+                self._print_memory_usage(self.kv_cache1)
+            return
+
+        # Record asynchronously during profiling so timing itself does not add
+        # a synchronization at every quantization boundary.
         start_time = torch.cuda.Event(enable_timing=True)
         end_time = torch.cuda.Event(enable_timing=True)
         start_time.record()
-
-        # Do nothing if quantization type is none
-        if self.quant_config.quant_type == "none":
-            self._print_memory_usage(self.kv_cache1)
-            return
+        self._quantize_calls += 1
 
         cprint(f"Quantizing kv cache with config:\n{self.quant_config}", "light_blue")
 
@@ -200,7 +208,8 @@ class CausalInferencePipeline(torch.nn.Module):
                         k, v, self.quant_config, self.headwise_policy, layer_idx=layer_idx
                     )
 
-                self._print_kv_cache_mse_error(k, k_quant, v, v_quant, layer_idx)
+                if not self._profile_runtime or os.getenv("TRQ_PROFILE_RECON_ERROR", "0") == "1":
+                    self._print_kv_cache_mse_error(k, k_quant, v, v_quant, layer_idx)
 
                 if capture_first_event and layer_idx in capture_layers:
                     from trq.analysis.online_snapshot import save_online_snapshot
@@ -249,11 +258,14 @@ class CausalInferencePipeline(torch.nn.Module):
             self._trq_parity_first_event_captured = True
 
         end_time.record()
-        torch.cuda.synchronize()
-        duration = start_time.elapsed_time(end_time)
-        cprint(f"Quantization KV Cache Time: {(duration / 1000):.2f} s", "light_cyan")
-
-        self._print_memory_usage(self.kv_cache1)
+        if self._profile_runtime:
+            self._quantize_event_pairs.append((start_time, end_time))
+        else:
+            torch.cuda.synchronize()
+            duration = start_time.elapsed_time(end_time)
+            cprint(f"Quantization KV Cache Time: {(duration / 1000):.2f} s", "light_cyan")
+            if os.getenv("TRQ_LEGACY_MEMORY_PROBE", "0") == "1":
+                self._print_memory_usage(self.kv_cache1)
 
     
     def _print_kv_cache_mse_error(self, k, k_quant, v, v_quant, layer_idx):
@@ -336,6 +348,23 @@ class CausalInferencePipeline(torch.nn.Module):
                 It is normalized to be in the range [0, 1].
         """
         batch_size, num_frames, num_channels, height, width = noise.shape
+        self._profile_runtime = bool(profile)
+        self._quantize_calls = 0
+        self._quantize_event_pairs = []
+        self.last_runtime_metrics = {}
+        if profile:
+            torch.cuda.reset_peak_memory_stats()
+            init_start = torch.cuda.Event(enable_timing=True)
+            init_end = torch.cuda.Event(enable_timing=True)
+            diffusion_start = torch.cuda.Event(enable_timing=True)
+            diffusion_end = torch.cuda.Event(enable_timing=True)
+            vae_start = torch.cuda.Event(enable_timing=True)
+            vae_end = torch.cuda.Event(enable_timing=True)
+            block_times = []
+            block_start = torch.cuda.Event(enable_timing=True)
+            block_end = torch.cuda.Event(enable_timing=True)
+            init_start.record()
+
         if not self.independent_first_frame or (self.independent_first_frame and initial_latent is not None):
             # If the first frame is independent and the first frame is provided, then the number of frames in the
             # noise should still be a multiple of num_frame_per_block
@@ -361,19 +390,6 @@ class CausalInferencePipeline(torch.nn.Module):
             dtype=noise.dtype
         )
 
-        # Set up profiling if requested
-        if profile:
-            init_start = torch.cuda.Event(enable_timing=True)
-            init_end = torch.cuda.Event(enable_timing=True)
-            diffusion_start = torch.cuda.Event(enable_timing=True)
-            diffusion_end = torch.cuda.Event(enable_timing=True)
-            vae_start = torch.cuda.Event(enable_timing=True)
-            vae_end = torch.cuda.Event(enable_timing=True)
-            block_times = []
-            block_start = torch.cuda.Event(enable_timing=True)
-            block_end = torch.cuda.Event(enable_timing=True)
-            init_start.record()
-
         # Step 1: Initialize KV cache to all zeros (size depends on target length when using global attention)
         if self.kv_cache1 is None:
             # When local_attn_size == -1 we need a cache large enough for the entire sequence
@@ -387,7 +403,8 @@ class CausalInferencePipeline(torch.nn.Module):
                 batch_size=batch_size,
                 dtype=noise.dtype,
                 device=noise.device,
-                target_frames=target_frames
+                target_frames=target_frames,
+                profile=profile,
             )
             self._initialize_crossattn_cache(
                 batch_size=batch_size,
@@ -404,6 +421,10 @@ class CausalInferencePipeline(torch.nn.Module):
                     [0], dtype=torch.long, device=noise.device)
                 layer["local_end_index"] = torch.tensor(
                     [0], dtype=torch.long, device=noise.device)
+                for kind in ("k", "v"):
+                    cache = layer.get(kind)
+                    if isinstance(cache, ChunkedKVCache):
+                        cache.enable_profiling(profile)
 
         # Step 2: Cache context feature
         current_start_frame = 0
@@ -478,11 +499,18 @@ class CausalInferencePipeline(torch.nn.Module):
                 # assert tokens_to_quantize == np.sum(all_num_frames[:chunk_index]) * self.frame_seq_length
                 
                 # Only quantize the previous chunks
+                interval_frames = int(np.sum(
+                    all_num_frames[chunk_index - quantization_chunk_interval:chunk_index]
+                ))
+                tokens_to_quantize_end = int(max_tokens_to_quantize)
                 tokens_to_quantize_start = int(
-                    np.sum(all_num_frames[:chunk_index - quantization_chunk_interval])
-                    * self.frame_seq_length
+                    tokens_to_quantize_end - interval_frames * self.frame_seq_length
                 )
-                tokens_to_quantize_end = int(np.sum(all_num_frames[:chunk_index]) * self.frame_seq_length)
+                if tokens_to_quantize_start < 0:
+                    raise ValueError(
+                        f"Local KV window is shorter than the quantization interval: "
+                        f"start={tokens_to_quantize_start}, end={tokens_to_quantize_end}"
+                    )
             
                 self.quantize_kv_cache(tokens_to_quantize_start, tokens_to_quantize_end, max_tokens_to_quantize)
             
@@ -553,6 +581,12 @@ class CausalInferencePipeline(torch.nn.Module):
             torch.cuda.synchronize()
             diffusion_time = diffusion_start.elapsed_time(diffusion_end)
             init_time = init_start.elapsed_time(init_end)
+            quantize_time = sum(
+                float(start.elapsed_time(end))
+                for start, end in self._quantize_event_pairs
+            )
+            cache_storage = summarize_kv_cache(self.kv_cache1)
+            cache_profile = summarize_cache_profile(self.kv_cache1, synchronize=False)
             vae_start.record()
 
         if return_latents and not decode_video:
@@ -669,6 +703,27 @@ class CausalInferencePipeline(torch.nn.Module):
             vae_time = vae_start.elapsed_time(vae_end)
             total_time = init_time + diffusion_time + vae_time
 
+            self.last_runtime_metrics = {
+                "schema_version": 1,
+                "stages_ms": {
+                    "initialization_and_text": float(init_time),
+                    "diffusion": float(diffusion_time),
+                    "vae_decode": float(vae_time),
+                    "pipeline_total": float(total_time),
+                },
+                "block_times_ms": [float(value) for value in block_times],
+                "operations": {
+                    "quantize_calls": int(self._quantize_calls),
+                    "quantize_ms": float(quantize_time),
+                    **cache_profile,
+                },
+                "kv_cache": cache_storage,
+                "memory": {
+                    "max_allocated_bytes": int(torch.cuda.max_memory_allocated()),
+                    "max_reserved_bytes": int(torch.cuda.max_memory_reserved()),
+                },
+            }
+
             print("Profiling results:")
             print(f"  - Initialization/caching time: {init_time:.2f} ms ({100 * init_time / total_time:.2f}%)")
             print(f"  - Diffusion generation time: {diffusion_time:.2f} ms ({100 * diffusion_time / total_time:.2f}%)")
@@ -682,7 +737,14 @@ class CausalInferencePipeline(torch.nn.Module):
         else:
             return video
 
-    def _initialize_kv_cache(self, batch_size, dtype, device, target_frames: int | None = None):
+    def _initialize_kv_cache(
+        self,
+        batch_size,
+        dtype,
+        device,
+        target_frames: int | None = None,
+        profile: bool = False,
+    ):
         """
         Initialize a Per-GPU KV cache for the Wan model.
         """
@@ -697,9 +759,13 @@ class CausalInferencePipeline(torch.nn.Module):
         max_num_chunks = kv_cache_size // self.frame_seq_length
 
         for _ in range(self.num_transformer_blocks):
+            k_cache = ChunkedKVCache(batch_size, self.frame_seq_length, self.num_heads, self.head_dim, max_num_chunks, dtype, device, layout="BSHD")
+            v_cache = ChunkedKVCache(batch_size, self.frame_seq_length, self.num_heads, self.head_dim, max_num_chunks, dtype, device, layout="BSHD")
+            k_cache.enable_profiling(profile)
+            v_cache.enable_profiling(profile)
             kv_cache1.append({
-                "k": ChunkedKVCache(batch_size, self.frame_seq_length, self.num_heads, self.head_dim, max_num_chunks, dtype, device, layout="BSHD"),
-                "v": ChunkedKVCache(batch_size, self.frame_seq_length, self.num_heads, self.head_dim, max_num_chunks, dtype, device, layout="BSHD"),
+                "k": k_cache,
+                "v": v_cache,
                 "global_end_index": torch.tensor([0], dtype=torch.long, device=device),
                 "local_end_index": torch.tensor([0], dtype=torch.long, device=device)
             })

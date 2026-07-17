@@ -61,6 +61,16 @@ export HRQ_PREDICTOR_PARAMS_DIR="${predictor_params_dir}"
 
 results_root="${RESULTS_ROOT:-${hwq_root}/results/selfforcing/vbench_eval_trq_predictor}"
 mkdir -p "${results_root}"
+runtime_args=()
+if [ "${PROFILE_RUNTIME:-0}" = "1" ]; then
+  runtime_args+=(--profile)
+fi
+if [ "${SAVE_ROLLOUT_LATENTS:-0}" = "1" ]; then
+  runtime_args+=(--save_rollout_latents)
+fi
+if [ -n "${ROLLOUT_METRICS_DIR:-}" ]; then
+  runtime_args+=(--rollout_metrics_dir "${ROLLOUT_METRICS_DIR}")
+fi
 
 # ── Common inference args ────────────────────────────────────────────
 common_args=(
@@ -87,6 +97,7 @@ common_args=(
   --num_high_precision_heads "${num_hp_heads}"
   --high_precision_quant_type "${hp_quant}"
   --low_precision_quant_type "${lp_quant}"
+  "${runtime_args[@]}"
 )
 
 # ── Helper: run one predictor mode ─────────────────────────────────

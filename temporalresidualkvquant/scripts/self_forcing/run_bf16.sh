@@ -19,6 +19,16 @@ local_attn_size="${LOCAL_ATTN_SIZE:-180}"
 num_output_frames="${NUM_OUTPUT_FRAMES:-180}"
 ckpt_path="${CKPT_PATH:-${ckpt_root}/self_forcing_dmd.pt}"
 output_folder="${OUTPUT_FOLDER:-${hwq_root}/outputs/self_forcing/bf16}"
+runtime_args=()
+if [ "${PROFILE_RUNTIME:-0}" = "1" ]; then
+  runtime_args+=(--profile)
+fi
+if [ "${SAVE_ROLLOUT_LATENTS:-0}" = "1" ]; then
+  runtime_args+=(--save_rollout_latents)
+fi
+if [ -n "${ROLLOUT_METRICS_DIR:-}" ]; then
+  runtime_args+=(--rollout_metrics_dir "${ROLLOUT_METRICS_DIR}")
+fi
 
 echo "temporalresidualkvquant root: ${hwq_root}"
 echo "Self-Forcing backend: ${self_forcing_root}"
@@ -40,4 +50,5 @@ DUMP_KV_LEVEL="${DUMP_KV_LEVEL:-0}" torchrun --nproc_per_node=1 --standalone "${
   --local_attn_size "${local_attn_size}" \
   --use_ema \
   --save_with_index \
+  "${runtime_args[@]}" \
   --quant_type none

@@ -24,6 +24,39 @@ git -C ~/workspace/VideoGen-Temporal-Residual-Quant rev-parse HEAD
 git -C ~/workspace/qvg rev-parse HEAD
 ```
 
+### 指定可用 GPU
+
+如果集群只允许使用物理 GPU 2，运行跨仓库实验时同时设置
+`CUDA_VISIBLE_DEVICES=2` 和 `GPU_IDS=2`：
+
+```bash
+CUDA_VISIBLE_DEVICES=2 GPU_IDS=2 \
+QVG_ROOT=~/workspace/qvg \
+bash scripts/analysis/run_bf16_cross_repo.sh
+
+CUDA_VISIBLE_DEVICES=2 GPU_IDS=2 \
+QVG_ROOT=~/workspace/qvg \
+bash scripts/analysis/run_identity_online_matrix.sh
+```
+
+单独运行 TRQ 时只需：
+
+```bash
+CUDA_VISIBLE_DEVICES=2 \
+bash scripts/self_forcing/run_hrq_predictor_ablation.sh identity
+```
+
+设置后，物理 GPU 2 会在当前进程内映射成逻辑 `cuda:0`，日志显示 `cuda:0`
+是正常现象。可以先验证：
+
+```bash
+CUDA_VISIBLE_DEVICES=2 python -c \
+'import torch; print(torch.cuda.device_count()); print(torch.cuda.get_device_name(0))'
+```
+
+预期设备数量为 `1`。不要设置 `CUDA_VISIBLE_DEVICES=2,3`，否则程序会同时看到
+两张卡。
+
 ## 2. BF16 基线
 
 先确认两个 Self-Forcing 后端本身一致：
