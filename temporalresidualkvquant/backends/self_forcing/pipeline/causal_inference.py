@@ -20,9 +20,10 @@ from trq import (
     load_topk_head_policy,
     offload_kv_cache_layer,
     onload_kv_cache_layer,
-    uncompress_kv_cache,
+    uncompress_single_cache,
 )
 from trq.analysis.kv_dump import parse_layer_spec
+from trq.online_schedule import OnlineQuantizationSchedule, global_span_to_local
 from trq.runtime_metrics import summarize_cache_profile, summarize_kv_cache
 
 class CausalInferencePipeline(torch.nn.Module):
@@ -70,12 +71,24 @@ class CausalInferencePipeline(torch.nn.Module):
         self.num_heads = getattr(self.generator.model, "num_heads", 12)
         self.head_dim = getattr(self.generator.model, "head_dim", 128)
         self.headwise_policy = self._build_headwise_policy()
+        self.quantized_layers = parse_layer_spec(
+            str(getattr(self.quant_config, "trq_quantized_layers", "all")),
+            self.num_transformer_blocks,
+        )
+        cache_roles = str(getattr(self.quant_config, "trq_cache_roles", "both")).lower()
+        if cache_roles not in {"both", "k", "v"}:
+            raise ValueError(f"trq_cache_roles must be both, k, or v, got {cache_roles!r}")
+        self.quantize_k = cache_roles in {"both", "k"}
+        self.quantize_v = cache_roles in {"both", "v"}
 
         self.generator.model.kv_cache_cpu_offload = getattr(self.quant_config, "kv_cache_cpu_offload", False)
         self.last_runtime_metrics = {}
         self._profile_runtime = False
         self._quantize_calls = 0
         self._quantize_event_pairs = []
+        self.last_quantization_events = []
+        self._trq_parity_first_event_captured = False
+        self._trq_attention_first_event_captured = False
 
     def _build_headwise_policy(self):
         mode = getattr(self.quant_config, "headwise_mode", "none")
@@ -137,7 +150,14 @@ class CausalInferencePipeline(torch.nn.Module):
         cprint(f"Head-wise policy: {policy.groups()}", "light_blue")
         return policy
 
-    def quantize_kv_cache(self, tokens_to_quantize_start: int, tokens_to_quantize_end: int, max_tokens_to_quantize: int):
+    def quantize_kv_cache(
+        self,
+        tokens_to_quantize_start: int,
+        tokens_to_quantize_end: int,
+        max_tokens_to_quantize: int,
+        *,
+        schedule_event,
+    ):
         """
         Quantize a range of the KV cache.  Indices are in token space and
         must be frame-aligned.
@@ -180,6 +200,17 @@ class CausalInferencePipeline(torch.nn.Module):
                 os.getenv("TRQ_PARITY_CAPTURE_LAYERS", "0"), len(self.kv_cache1)
             )
         captured_paths = []
+        attention_trace_dir = os.getenv("TRQ_ATTENTION_TRACE_DIR", "").strip()
+        capture_attention = bool(attention_trace_dir) and not getattr(
+            self, "_trq_attention_first_event_captured", False
+        )
+        attention_trace_layers = set()
+        if capture_attention:
+            from trq.analysis.online_snapshot import parse_capture_layers
+
+            attention_trace_layers = parse_capture_layers(
+                os.getenv("TRQ_ATTENTION_TRACE_LAYERS", "all"), len(self.kv_cache1)
+            )
 
         with torch.no_grad():
             quantize_fn = None
@@ -187,6 +218,8 @@ class CausalInferencePipeline(torch.nn.Module):
                 quantize_fn = get_quantize_fn(self.quant_config.quant_type, self.quant_config)
 
             for layer_idx, layer in enumerate(self.kv_cache1):
+                if layer_idx not in self.quantized_layers:
+                    continue
                 if do_offload:
                     onload_kv_cache_layer(layer, cuda_device)
 
@@ -209,25 +242,29 @@ class CausalInferencePipeline(torch.nn.Module):
                     )
 
                 if not self._profile_runtime or os.getenv("TRQ_PROFILE_RECON_ERROR", "0") == "1":
-                    self._print_kv_cache_mse_error(k, k_quant, v, v_quant, layer_idx)
+                    self._print_kv_cache_mse_error(
+                        k,
+                        k_quant if self.quantize_k else k,
+                        v,
+                        v_quant if self.quantize_v else v,
+                        layer_idx,
+                    )
 
                 if capture_first_event and layer_idx in capture_layers:
                     from trq.analysis.online_snapshot import save_online_snapshot
 
-                    if isinstance(k_quant, dict) and isinstance(v_quant, dict):
-                        decoded_k, decoded_v = uncompress_kv_cache(k_quant, v_quant)
-                    else:
-                        decoded_k, decoded_v = k_quant, v_quant
+                    decoded_k = uncompress_single_cache(k_quant)
+                    decoded_v = uncompress_single_cache(v_quant)
                     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
                     snapshot_path = save_online_snapshot(
                         parity_capture_dir,
                         layer_idx=layer_idx,
                         raw_k=k,
                         raw_v=v,
-                        decoded_k=decoded_k,
-                        decoded_v=decoded_v,
-                        encoded_k=k_quant,
-                        encoded_v=v_quant,
+                        decoded_k=decoded_k if self.quantize_k else k,
+                        decoded_v=decoded_v if self.quantize_v else v,
+                        encoded_k=k_quant if self.quantize_k else k,
+                        encoded_v=v_quant if self.quantize_v else v,
                         tokens_start=tokens_to_quantize_start,
                         tokens_end=tokens_to_quantize_end,
                         max_tokens=max_tokens_to_quantize,
@@ -237,25 +274,52 @@ class CausalInferencePipeline(torch.nn.Module):
                     captured_paths.append(snapshot_path)
                     cprint(f"Saved first-event parity snapshot: {snapshot_path}", "light_cyan")
 
-                # Pack decompression metadata for real-quantized dicts
-                if self.headwise_policy is None and isinstance(k_quant, dict) and isinstance(v_quant, dict):
-                    k_quant, v_quant = self._pack_info_into_kv_cache(
-                        k_quant, v_quant, k.dtype
-                    )
+                if capture_attention and layer_idx in attention_trace_layers:
+                    layer["_trq_attention_reference"] = {
+                        "k": k.permute(0, 2, 1, 3).contiguous() if self.quantize_k else None,
+                        "v": v.permute(0, 2, 1, 3).contiguous() if self.quantize_v else None,
+                        "tokens_start": int(tokens_to_quantize_start),
+                        "tokens_end": int(tokens_to_quantize_end),
+                        "boundary_frame": int(schedule_event.boundary_frame),
+                        "output_dir": attention_trace_dir,
+                        "layer_idx": int(layer_idx),
+                        "cache_roles": str(getattr(self.quant_config, "trq_cache_roles", "both")),
+                        "max_query_tokens": int(os.getenv("TRQ_ATTENTION_TRACE_MAX_Q", "64")),
+                        "max_key_tokens": int(os.getenv("TRQ_ATTENTION_TRACE_MAX_K", "256")),
+                        "topk": int(os.getenv("TRQ_ATTENTION_TRACE_TOPK", "8")),
+                    }
+
+                # Pack decompression metadata for real-quantized dicts.
+                if self.headwise_policy is None:
+                    k_quant = self._pack_info_into_single_cache(k_quant, k.dtype)
+                    v_quant = self._pack_info_into_single_cache(v_quant, v.dtype)
 
                 # store_quantized handles both tensor (fake) and dict (real)
-                layer["k"].store_quantized(
-                    tokens_to_quantize_start, tokens_to_quantize_end, k_quant
-                )
-                layer["v"].store_quantized(
-                    tokens_to_quantize_start, tokens_to_quantize_end, v_quant
-                )
+                if self.quantize_k:
+                    layer["k"].store_quantized(
+                        tokens_to_quantize_start, tokens_to_quantize_end, k_quant
+                    )
+                if self.quantize_v:
+                    layer["v"].store_quantized(
+                        tokens_to_quantize_start, tokens_to_quantize_end, v_quant
+                    )
 
                 if do_offload:
                     offload_kv_cache_layer(layer)
 
         if captured_paths:
             self._trq_parity_first_event_captured = True
+        if capture_attention:
+            self._trq_attention_first_event_captured = True
+
+        event_payload = schedule_event.to_dict()
+        event_payload.update({
+            "local_start_frame": int(tokens_to_quantize_start // self.frame_seq_length),
+            "local_end_frame": int(tokens_to_quantize_end // self.frame_seq_length),
+            "cache_roles": str(getattr(self.quant_config, "trq_cache_roles", "both")),
+            "quantized_layers": [int(value) for value in self.quantized_layers],
+        })
+        self.last_quantization_events.append(event_payload)
 
         end_time.record()
         if self._profile_runtime:
@@ -271,8 +335,8 @@ class CausalInferencePipeline(torch.nn.Module):
     def _print_kv_cache_mse_error(self, k, k_quant, v, v_quant, layer_idx):
         """Print the Rel L2 error between the original and quantized KV cache."""
 
-        if isinstance(k_quant, dict) and isinstance(v_quant, dict):
-            k_quant, v_quant = uncompress_kv_cache(k_quant, v_quant)
+        k_quant = uncompress_single_cache(k_quant)
+        v_quant = uncompress_single_cache(v_quant)
 
         k_rel_l2 = torch.norm(k - k_quant, p=2) / torch.norm(k, p=2)
         v_rel_l2 = torch.norm(v - v_quant, p=2) / torch.norm(v, p=2)
@@ -306,19 +370,13 @@ class CausalInferencePipeline(torch.nn.Module):
             "light_blue",
         )
 
-    def _pack_info_into_kv_cache(self, k_cache, v_cache, output_dtype):
-        """Pack metadata into KV cache. Only when the cached value is a real quantized dict."""
-        if isinstance(k_cache, dict) and isinstance(v_cache, dict):
-            k_cache["info"] = {
+    def _pack_info_into_single_cache(self, cache, output_dtype):
+        if isinstance(cache, dict):
+            cache["info"] = {
                 "output_dtype": output_dtype,
                 "quant_config": self.quant_config,
             }
-            v_cache["info"] = {
-                "output_dtype": output_dtype,
-                "quant_config": self.quant_config,
-            }
-        return k_cache, v_cache
-    
+        return cache
 
     def inference(
         self,
@@ -351,6 +409,35 @@ class CausalInferencePipeline(torch.nn.Module):
         self._profile_runtime = bool(profile)
         self._quantize_calls = 0
         self._quantize_event_pairs = []
+        self.last_quantization_events = []
+        self._trq_attention_first_event_captured = False
+        aligned_schedule_values = {
+            "trq_first_quant_frame": int(getattr(self.quant_config, "trq_first_quant_frame", 24)),
+            "trq_quant_interval_frames": int(
+                getattr(self.quant_config, "trq_quant_interval_frames", 24)
+            ),
+            "trq_gradual_frames": int(getattr(self.quant_config, "trq_gradual_frames", 3)),
+            "trq_protected_sink_frames": int(
+                getattr(self.quant_config, "trq_protected_sink_frames", 0)
+            ),
+            "attention_sink_frames": int(getattr(self.quant_config, "attention_sink_frames", 0)),
+        }
+        misaligned = {
+            name: value
+            for name, value in aligned_schedule_values.items()
+            if value % self.num_frame_per_block != 0
+        }
+        if misaligned:
+            raise ValueError(
+                f"TRQ schedule values must align to {self.num_frame_per_block}-frame blocks: {misaligned}"
+            )
+        quantization_schedule = OnlineQuantizationSchedule(
+            first_quant_frame=aligned_schedule_values["trq_first_quant_frame"],
+            interval_frames=aligned_schedule_values["trq_quant_interval_frames"],
+            schedule=str(getattr(self.quant_config, "trq_quant_schedule", "bulk")),
+            gradual_frames=aligned_schedule_values["trq_gradual_frames"],
+            protected_sink_frames=aligned_schedule_values["trq_protected_sink_frames"],
+        )
         self.last_runtime_metrics = {}
         if profile:
             torch.cuda.reset_peak_memory_stats()
@@ -425,6 +512,7 @@ class CausalInferencePipeline(torch.nn.Module):
                     cache = layer.get(kind)
                     if isinstance(cache, ChunkedKVCache):
                         cache.enable_profiling(profile)
+                layer.pop("_trq_attention_reference", None)
 
         # Step 2: Cache context feature
         current_start_frame = 0
@@ -474,7 +562,6 @@ class CausalInferencePipeline(torch.nn.Module):
         all_num_frames = [self.num_frame_per_block] * num_blocks
         if self.independent_first_frame and initial_latent is None:
             all_num_frames = [1] + all_num_frames
-        quantization_chunk_interval = 8
         for chunk_index, current_num_frames in enumerate(tqdm(all_num_frames)):
             if profile:
                 block_start.record()
@@ -483,36 +570,29 @@ class CausalInferencePipeline(torch.nn.Module):
                 :, current_start_frame - num_input_frames:current_start_frame + current_num_frames - num_input_frames]
             
             #########################################################
-            # Possiply quantize the KV cache here
+            # Possibly quantize the KV cache here
             #########################################################
-            # When generating the first 8 chunks, we do not quantize them.
-
-            if (
-                chunk_index < quantization_chunk_interval
-                or chunk_index % quantization_chunk_interval != 0
-            ):
-                pass
-            else:
+            completed_frames = int(sum(all_num_frames[:chunk_index]))
+            schedule_event = quantization_schedule.event_at(completed_frames)
+            if schedule_event is not None:
                 max_tokens_to_quantize = self.kv_cache1[0]["local_end_index"].item()
                 cprint(f"\nAt Chunk {chunk_index}, max tokens to quantize: {max_tokens_to_quantize} tokens", "light_cyan")            
-                
-                # assert tokens_to_quantize == np.sum(all_num_frames[:chunk_index]) * self.frame_seq_length
-                
-                # Only quantize the previous chunks
-                interval_frames = int(np.sum(
-                    all_num_frames[chunk_index - quantization_chunk_interval:chunk_index]
-                ))
-                tokens_to_quantize_end = int(max_tokens_to_quantize)
-                tokens_to_quantize_start = int(
-                    tokens_to_quantize_end - interval_frames * self.frame_seq_length
+                local_start_frame, local_end_frame = global_span_to_local(
+                    schedule_event,
+                    completed_frames=completed_frames,
+                    local_frames=int(max_tokens_to_quantize // self.frame_seq_length),
+                    attention_sink_frames=int(
+                        getattr(self.quant_config, "attention_sink_frames", 0)
+                    ),
                 )
-                if tokens_to_quantize_start < 0:
-                    raise ValueError(
-                        f"Local KV window is shorter than the quantization interval: "
-                        f"start={tokens_to_quantize_start}, end={tokens_to_quantize_end}"
-                    )
-            
-                self.quantize_kv_cache(tokens_to_quantize_start, tokens_to_quantize_end, max_tokens_to_quantize)
+                tokens_to_quantize_start = local_start_frame * self.frame_seq_length
+                tokens_to_quantize_end = local_end_frame * self.frame_seq_length
+                self.quantize_kv_cache(
+                    tokens_to_quantize_start,
+                    tokens_to_quantize_end,
+                    max_tokens_to_quantize,
+                    schedule_event=schedule_event,
+                )
             
             # Step 3.1: Spatial denoising loop
             for index, current_timestep in enumerate(self.denoising_step_list):
@@ -610,26 +690,18 @@ class CausalInferencePipeline(torch.nn.Module):
                     "num_frame_per_block": int(self.num_frame_per_block),
                     "independent_first_frame": bool(self.independent_first_frame),
                     "generation_chunk_frame_counts": [int(value) for value in all_num_frames],
-                    "quantization_chunk_interval": int(quantization_chunk_interval),
+                    "quantization_schedule": str(
+                        getattr(self.quant_config, "trq_quant_schedule", "bulk")
+                    ),
                     "local_attn_size": int(self.local_attn_size),
                     "quant_type": str(getattr(self.quant_config, "quant_type", "none")),
                     "kv_layout": "BSHD",
                     "key_position": "pre_rope",
                 }
-                scheduled_spans = []
-                for boundary in range(
-                    quantization_chunk_interval,
-                    len(all_num_frames),
-                    quantization_chunk_interval,
-                ):
-                    start_chunk = boundary - quantization_chunk_interval
-                    scheduled_spans.append({
-                        "start_frame": int(sum(all_num_frames[:start_chunk])),
-                        "end_frame": int(sum(all_num_frames[:boundary])),
-                    })
+                scheduled_spans = list(self.last_quantization_events)
                 metadata["scheduled_trq_frame_spans"] = scheduled_spans
                 metadata["scheduled_unquantized_tail_start_frame"] = (
-                    scheduled_spans[-1]["end_frame"] if scheduled_spans else 0
+                    scheduled_spans[-1]["global_end_frame"] if scheduled_spans else 0
                 )
                 if dump_format == "layer_shards":
                     existing = len([f for f in os.listdir(dump_dir) if f.endswith("_manifest.json")])

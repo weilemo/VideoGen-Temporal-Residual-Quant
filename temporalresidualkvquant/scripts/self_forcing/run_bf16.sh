@@ -19,6 +19,7 @@ local_attn_size="${LOCAL_ATTN_SIZE:-180}"
 num_output_frames="${NUM_OUTPUT_FRAMES:-180}"
 ckpt_path="${CKPT_PATH:-${ckpt_root}/self_forcing_dmd.pt}"
 output_folder="${OUTPUT_FOLDER:-${hwq_root}/outputs/self_forcing/bf16}"
+attention_sink_frames="${ATTENTION_SINK_FRAMES:-0}"
 runtime_args=()
 if [ "${PROFILE_RUNTIME:-0}" = "1" ]; then
   runtime_args+=(--profile)
@@ -28,6 +29,9 @@ if [ "${SAVE_ROLLOUT_LATENTS:-0}" = "1" ]; then
 fi
 if [ -n "${ROLLOUT_METRICS_DIR:-}" ]; then
   runtime_args+=(--rollout_metrics_dir "${ROLLOUT_METRICS_DIR}")
+fi
+if [ -n "${PROMPT_INDICES:-}" ]; then
+  runtime_args+=(--prompt_indices "${PROMPT_INDICES}")
 fi
 
 echo "temporalresidualkvquant root: ${hwq_root}"
@@ -48,6 +52,7 @@ DUMP_KV_LEVEL="${DUMP_KV_LEVEL:-0}" torchrun --nproc_per_node=1 --standalone "${
   --seed "${SEED:-0}" \
   --num_output_frames "${num_output_frames}" \
   --local_attn_size "${local_attn_size}" \
+  --attention_sink_frames "${attention_sink_frames}" \
   --use_ema \
   --save_with_index \
   "${runtime_args[@]}" \

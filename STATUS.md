@@ -7,6 +7,14 @@
 
 ## 正在做什么
 
+- **TRQ 在线分叉 E0-E5 实验框架已落地（2026-07-20）**：
+  - E0 新增 absolute metrics、真实 boundary jump、事件标线曲线和 prompt heatmap；
+  - E1 新增逐 prompt/seed paired VBench、latent-quality Spearman、人工 failure tags 和 fail-closed quality gate；
+  - E2/E3 支持 Delay-48/72、BF16 sink、Gradual-3、K-only/V-only、layer groups 和 sampled attention trace；
+  - E4 gate 同时检查质量、相对 K2V2 的 boundary-jump 降幅和 actual KV saving；
+  - E5 的 183/501/699 分阶段执行，501/699 不再由 latent gate 自动放行；
+  - 当前 EPIC launcher 只接受物理 GPU 0/1；E6 留到质量 winner 冻结后的独立分支。
+
 - **TRQ 统一完成（2026-07-11）**：
   - 本机主目录改为 `/Users/moweile/Code/LAB/videoquant-trq`。
   - `src/trq/real/trq.py` 是 temporal residual quantization 唯一稳定实现；Python 包入口统一为 `trq`。
@@ -165,6 +173,11 @@
   - 两阶段 smoke test 也已验证通过（42 frames, 6 heads），但因 external 已有现成 360-heads 结果，无需自己跑全量
 
 ## 当前阻塞 / 未完成
+
+- E1 仍需在集群复用现有 48 条视频完成 VBench，并人工填写定性 failure tags；
+- E2/E3 只完成代码与 CPU/dry-run 验证，尚未生成新 GPU 结果；
+- E4 候选必须依据 E2/E3 结果选择，当前没有预先指定 winner；
+- E6 Triton/decoded-cache 优化尚未启动，符合质量 winner 冻结后另开分支的计划。
 
 - head importance 目前采用 focused-forcing head ablation 的 DMD loss 聚合；后续仍需评估它和 identity / scene / motion 质量维度的相关性。
 - Top-K vs random 的增益在 int4+int2 下仅 +0.38pp（0.6303 vs 0.6279），在 int8+int4 下尚未有 random 对照

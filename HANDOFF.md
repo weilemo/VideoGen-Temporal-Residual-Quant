@@ -20,6 +20,15 @@ cd /Users/moweile/Code/LAB/videoquant-trq
 
 ## 当前接力点
 
+- 2026-07-20 在线分叉计划已实现于 `codex/trq-online-causal-gates`：
+  - 总协议：`temporalresidualkvquant/docs/online_causal_experiments.md`；
+  - CPU E0：`scripts/analysis/reanalyze_existing_online_runs.sh`；
+  - GPU E2/E3：`scripts/analysis/run_online_causal_diagnosis.sh`，只允许 GPU 0/1；
+  - E4：`run_e4_candidates.sh` + `analyze_protection_gate.py`；
+  - E5：`run_quality_gated_long_rollout.sh`，183/501/699 分阶段且 quality gate 失败关闭。
+- 下一步不是继续改 codec，而是在 code-server 拉取本分支后先跑 E0/E1；E1 人工标签完整前不能启动 E5。
+- E6 不在本分支；只有质量 winner 冻结后才另开系统优化分支。
+
 - `Self-Forcing` 八条实验线均已跑通，七条完成 VBench 评估（2-prompt），一条完成 32-prompt VBench 评估：
   - 2-prompt 结果位于 `temporalresidualkvquant/results/selfforcing/`：
     - `bf16/` — BF16 baseline (Final Score: 0.6486)
