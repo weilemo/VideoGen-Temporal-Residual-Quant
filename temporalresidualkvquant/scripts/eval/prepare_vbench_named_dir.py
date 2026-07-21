@@ -18,5 +18,5 @@ if not files:
     raise SystemExit(f"no mp4 found in {src}")
 for pth in files:
     idx = int(pth.name.split("-")[0])
-    (dst / f"{idx}_ema-0.mp4").symlink_to(pth.resolve())
+    (dst / f"{idx}-0_ema.mp4").symlink_to(pth.resolve())
 print(f"linked {len(files)} videos: {src} -> {dst}")
