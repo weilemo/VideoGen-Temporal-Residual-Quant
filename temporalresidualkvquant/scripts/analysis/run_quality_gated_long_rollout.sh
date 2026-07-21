@@ -5,14 +5,14 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 trq_root="$(cd "${script_dir}/../.." && pwd)"
-gpu_id="${GPU_ID:-0}"
+gpu_id="${GPU_ID:-2}"
 stage="${STAGE:?Set STAGE to 183, 501, or 699}"
 winner="${WINNER_CONFIG:?Set WINNER_CONFIG to the E4 config name}"
 quality_gate="${QUALITY_GATE_JSON:?Set QUALITY_GATE_JSON to E1/E4 quality_gate.json}"
 run_root="${RUN_ROOT:-${HOME}/storage/runs/trq_causal_20260720/e5}"
 prompts="${PROMPTS_PATH:-${trq_root}/assets/mb32_paired_smoke4.txt}"
 
-case "${gpu_id}" in 0|1) ;; *) echo "ERROR: GPU_ID must be 0 or 1" >&2; exit 2 ;; esac
+case "${gpu_id}" in 2|3) ;; *) echo "ERROR: GPU_ID must be 2 or 3" >&2; exit 2 ;; esac
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
 
 python - "${quality_gate}" "${winner}" <<'PY'

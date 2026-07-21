@@ -10,11 +10,11 @@ vbench_root="${VBENCH_ROOT:?Set VBENCH_ROOT to the VBench checkout}"
 prompt_file="${PROMPTS_PATH:-${trq_root}/assets/mb32_paired_smoke4.txt}"
 output_root="${OUTPUT_ROOT:-${trq_root}/results/online_causal/e1_vbench}"
 eval_script="${VBENCH_EVAL_SCRIPT:-${vbench_root}/vbench2_beta_long/eval_long.py}"
-gpu_id="${GPU_ID:-0}"
+gpu_id="${GPU_ID:-2}"
 
 case "${gpu_id}" in
-  0|1) ;;
-  *) echo "ERROR: GPU_ID must be 0 or 1 for this lease, got ${gpu_id}" >&2; exit 2 ;;
+  2|3) ;;
+  *) echo "ERROR: GPU_ID must be 2 or 3 for this lease, got ${gpu_id}" >&2; exit 2 ;;
 esac
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
 

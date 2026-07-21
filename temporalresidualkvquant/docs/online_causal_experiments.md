@@ -15,12 +15,12 @@ E6 的 Triton decoder、decoded-span cache 和 fused attention 不在本分支�
 
 ## 1. 固定 GPU 边界
 
-当前 EPIC 租约只允许物理 GPU 0/1。所有新增生成 launcher 默认使用 GPU 0，
+当前 EPIC 租约只允许物理 GPU 2/3。所有新增生成 launcher 默认使用 GPU 2，
 并对其他编号失败关闭：
 
 ```bash
-GPU_ID=0 DRY_RUN=1 bash scripts/analysis/run_online_causal_diagnosis.sh
-GPU_ID=1 STAGE=e2 bash scripts/analysis/run_online_causal_diagnosis.sh
+GPU_ID=2 DRY_RUN=1 bash scripts/analysis/run_online_causal_diagnosis.sh
+GPU_ID=3 STAGE=e2 bash scripts/analysis/run_online_causal_diagnosis.sh
 ```
 
 GPU 命令应从已经登录的 code-server 终端执行。本地 macOS 只负责开发、CPU
@@ -61,7 +61,7 @@ config<TAB>seed<TAB>label<TAB>video_dir
 ```bash
 E1_RUNS_TSV=/path/to/e1_runs.tsv \
 VBENCH_ROOT=/path/to/VBench \
-GPU_ID=0 \
+GPU_ID=2 \
 OUTPUT_ROOT=~/storage/runs/trq_causal_20260720/e1_vbench \
   bash scripts/eval/run_paired_vbench.sh
 ```
@@ -103,14 +103,14 @@ python scripts/analysis/analyze_paired_quality.py \
 先 dry-run 确认矩阵：
 
 ```bash
-GPU_ID=0 DRY_RUN=1 bash scripts/analysis/run_online_causal_diagnosis.sh
+GPU_ID=2 DRY_RUN=1 bash scripts/analysis/run_online_causal_diagnosis.sh
 ```
 
 E2 使用 Smoke4 原始 prompt 文件的 index 0/2，因此不会因子集重编号而破坏
 与 BF16-A/B 的严格配对：
 
 ```bash
-GPU_ID=0 STAGE=e2 bash scripts/analysis/run_online_causal_diagnosis.sh
+GPU_ID=2 STAGE=e2 bash scripts/analysis/run_online_causal_diagnosis.sh
 ```
 
 矩阵是 Delay-48、Delay-72、BF16-sink24、BF16-sink48、Gradual-3，两个
@@ -119,7 +119,7 @@ prompts × 两个 seeds，共 20 条新视频。
 E3 使用东京街头 prompt / seed 0：
 
 ```bash
-GPU_ID=1 STAGE=e3 bash scripts/analysis/run_online_causal_diagnosis.sh
+GPU_ID=3 STAGE=e3 bash scripts/analysis/run_online_causal_diagnosis.sh
 ```
 
 它运行 K-only、V-only、layers 0-7、8-19、20-29。第一次实际量化后会对确定性
@@ -139,7 +139,7 @@ p1_k8v2<TAB>8<TAB>2<TAB>24<TAB>bulk<TAB>3<TAB>0<TAB>0<TAB>both<TAB>all
 运行：
 
 ```bash
-GPU_ID=0 E4_CANDIDATES_TSV=/path/to/e4.tsv \
+GPU_ID=2 E4_CANDIDATES_TSV=/path/to/e4.tsv \
   bash scripts/analysis/run_e4_candidates.sh
 ```
 
@@ -163,12 +163,12 @@ E5 launcher 必须读取 `quality_gate.json`，winner 不是 `PASS` 时拒绝运
 阶段分开调用，不能在一次队列里越过 501 quality stop rule：
 
 ```bash
-GPU_ID=0 STAGE=183 WINNER_CONFIG=p1_k8v2 \
+GPU_ID=2 STAGE=183 WINNER_CONFIG=p1_k8v2 \
 QUALITY_GATE_JSON=/path/to/quality_gate.json \
 TRQ_K_BITS=8 TRQ_V_BITS=2 \
   bash scripts/analysis/run_quality_gated_long_rollout.sh
 
-GPU_ID=0 STAGE=501 WINNER_CONFIG=p1_k8v2 \
+GPU_ID=2 STAGE=501 WINNER_CONFIG=p1_k8v2 \
 QUALITY_GATE_JSON=/path/to/quality_gate.json \
 TRQ_K_BITS=8 TRQ_V_BITS=2 \
   bash scripts/analysis/run_quality_gated_long_rollout.sh
@@ -178,7 +178,7 @@ TRQ_K_BITS=8 TRQ_V_BITS=2 \
 窗口完成 paired VBench 与人工判读后，只有 501 quality gate 为 `PASS` 才能启动：
 
 ```bash
-GPU_ID=1 STAGE=699 WINNER_CONFIG=p1_k8v2 \
+GPU_ID=3 STAGE=699 WINNER_CONFIG=p1_k8v2 \
 QUALITY_GATE_JSON=/path/to/quality_gate.json \
 E5_501_QUALITY_GATE_JSON=/path/to/501_quality_gate.json \
 TRQ_K_BITS=8 TRQ_V_BITS=2 \

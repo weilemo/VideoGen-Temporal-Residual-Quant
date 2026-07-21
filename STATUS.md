@@ -13,7 +13,7 @@
   - E2/E3 支持 Delay-48/72、BF16 sink、Gradual-3、K-only/V-only、layer groups 和 sampled attention trace；
   - E4 gate 同时检查质量、相对 K2V2 的 boundary-jump 降幅和 actual KV saving；
   - E5 的 183/501/699 分阶段执行，501/699 不再由 latent gate 自动放行；
-  - 当前 EPIC launcher 只接受物理 GPU 0/1；E6 留到质量 winner 冻结后的独立分支。
+  - 当前 EPIC launcher 只接受物理 GPU 2/3，默认 GPU 2；E6 留到质量 winner 冻结后的独立分支。
 
 - **TRQ 统一完成（2026-07-11）**：
   - 本机主目录改为 `/Users/moweile/Code/LAB/videoquant-trq`。
