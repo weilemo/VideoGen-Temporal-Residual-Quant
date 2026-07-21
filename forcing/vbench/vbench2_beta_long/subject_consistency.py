@@ -8,10 +8,9 @@ from tqdm import tqdm
 from PIL import Image
 from dreamsim import dreamsim
 from decord import VideoReader
-from torchvision.io import write_video
 from vbench.subject_consistency import compute_subject_consistency, subject_consistency
 from vbench.utils import load_video, load_dimension_info, dino_transform, dino_transform_Image
-from vbench2_beta_long.utils import reorganize_clips_results, create_video_from_first_frames, fuse_inclip_clip2clip
+from vbench2_beta_long.utils import write_video, reorganize_clips_results, create_video_from_first_frames, fuse_inclip_clip2clip
 from vbench2_beta_long.utils import dreamsim_transform, dreamsim_transform_Image, dinov2_transform, dinov2_transform_Image
 import logging
 logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
