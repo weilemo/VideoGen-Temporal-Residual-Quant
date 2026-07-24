@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODE="${1:?Usage: $0 {bf16|trq_int4|trq_int2|naive_int4|naive_int2} [prefix|continuation]}"
+MODE="${1:?Usage: $0 MODE [prefix|continuation]}"
 TASK="${2:-continuation}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
