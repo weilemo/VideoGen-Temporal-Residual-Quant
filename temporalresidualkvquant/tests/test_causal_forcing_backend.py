@@ -7,6 +7,7 @@ from trq.backends.causal_forcing import (
     packed_cache_bytes,
     quantize_cache_pair,
     reset_cache_pair,
+    write_cache,
 )
 
 
@@ -27,6 +28,33 @@ def test_bf16_mode_keeps_native_tensor_cache():
     cache = _cache("none")
     assert isinstance(cache, torch.Tensor)
     assert cache.shape == (1, 24, 2, 8)
+
+
+@pytest.mark.parametrize("quant_type", ["none", "trq-int4"])
+@pytest.mark.parametrize("max_frames", [21, 42, 84])
+def test_cache_capacity_tracks_requested_frames(quant_type, max_frames):
+    cache = create_cache(
+        batch_size=1,
+        frame_seq_length=4,
+        num_heads=2,
+        head_dim=8,
+        max_frames=max_frames,
+        dtype=torch.float32,
+        device=torch.device("cpu"),
+        quant_type=quant_type,
+    )
+    assert cache.shape[1] == max_frames * 4
+
+
+@pytest.mark.parametrize("quant_type", ["none", "trq-int4"])
+def test_cache_write_reports_capacity_and_token_mismatch(quant_type):
+    cache = _cache(quant_type)
+    value = torch.zeros((1, 8, 2, 8))
+    with pytest.raises(
+        ValueError,
+        match=r"start=20, end=28, capacity=24, value_tokens=8",
+    ):
+        write_cache(cache, 20, 28, value)
 
 
 @pytest.mark.parametrize(

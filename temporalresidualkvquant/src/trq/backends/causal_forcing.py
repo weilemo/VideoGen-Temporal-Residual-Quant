@@ -112,6 +112,16 @@ def read_cache(cache, start: int, end: int) -> torch.Tensor:
 
 
 def write_cache(cache, start: int, end: int, value: torch.Tensor) -> None:
+    capacity = cache_size(cache)
+    if value.ndim != 4:
+        raise ValueError(f"Causal Forcing cache value must be BSHD, got {value.shape}")
+    value_tokens = int(value.shape[1])
+    if start < 0 or end <= start or end > capacity or end - start != value_tokens:
+        raise ValueError(
+            "invalid Causal Forcing cache write: "
+            f"start={start}, end={end}, capacity={capacity}, "
+            f"value_tokens={value_tokens}"
+        )
     if isinstance(cache, ChunkedKVCache):
         cache.write(start, end, value)
     else:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -121,6 +122,27 @@ def save_video(video, path):
     iio.imwrite(str(path), tensor.cpu().numpy(), fps=15, codec="libx264")
 
 
+def is_decodable_video(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "csv=p=0",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0 and "video" in result.stdout.splitlines()
+
+
 def main():
     args, repo_root = parse_args()
     longcat_repo = Path(args.longcat_repo).resolve()
@@ -159,7 +181,7 @@ def main():
 
     for prompt_idx, prompt in selected:
         target = (prefix_dir if args.task == "prefix" else output_dir) / f"{prompt_idx}-0.mp4"
-        if target.exists() and not args.overwrite:
+        if is_decodable_video(target) and not args.overwrite:
             print(f"[skip] {target}")
             continue
         generator = torch.Generator(device=local_rank).manual_seed(args.seed + prompt_idx)

@@ -18,7 +18,7 @@ index 44a826d..f025210 100755
  
  from pipeline import (
      CausalDiffusionInferencePipeline,
-@@ -32,6 +34,13 @@ parser.add_argument("--seed", type=int, default=0, help="Random seed")
+@@ -32,6 +34,14 @@ parser.add_argument("--seed", type=int, default=0, help="Random seed")
  parser.add_argument("--i2v", action="store_true", help="Whether to perform I2V (or T2V by default)")
  parser.add_argument("--report_timing", action="store_true",
                      help="Only tested on A800, for the Causal Forcing++ latency. Not make claims for other hardware like H100. For the result on H100, refer to the reported results in the Self Forcing paper.")
@@ -29,10 +29,11 @@ index 44a826d..f025210 100755
 +parser.add_argument("--trq_predictor_mode", type=str, default="identity")
 +parser.add_argument("--trq_k_bits", type=int, default=0)
 +parser.add_argument("--trq_v_bits", type=int, default=0)
++parser.add_argument("--kv_cache_capacity_frames", type=int, default=0)
  args = parser.parse_args()
  
  # Initialize distributed inference
-@@ -57,6 +66,13 @@ torch.set_grad_enabled(False)
+@@ -57,6 +66,14 @@ torch.set_grad_enabled(False)
  config = OmegaConf.load(args.config_path)
  default_config = OmegaConf.load("configs/default_config.yaml")
  config = OmegaConf.merge(default_config, config)
@@ -43,6 +44,7 @@ index 44a826d..f025210 100755
 +config.trq_predictor_mode = args.trq_predictor_mode
 +config.trq_k_bits = args.trq_k_bits
 +config.trq_v_bits = args.trq_v_bits
++config.kv_cache_capacity_frames = args.kv_cache_capacity_frames or args.num_output_frames
  
  # Initialize pipeline
  if hasattr(config, 'denoising_step_list'):
@@ -90,9 +92,13 @@ index 48ad1dd..df5a62b 100755
                  self.kv_cache1[block_index]["global_end_index"] = torch.tensor(
                      [0], dtype=torch.long, device=noise.device)
                  self.kv_cache1[block_index]["local_end_index"] = torch.tensor(
-@@ -346,12 +349,24 @@ class CausalInferencePipeline(torch.nn.Module):
+@@ -346,12 +349,29 @@ class CausalInferencePipeline(torch.nn.Module):
              # Use the default KV cache size
              kv_cache_size = 32760
++        requested_cache_frames = int(getattr(self.args, "kv_cache_capacity_frames", 0))
++        if requested_cache_frames <= 0:
++            raise ValueError("kv_cache_capacity_frames must be positive")
++        kv_cache_size = max(kv_cache_size, requested_cache_frames * self.frame_seq_length)
  
 -        for _ in range(self.num_transformer_blocks):
 +        max_frames = kv_cache_size // self.frame_seq_length
@@ -104,6 +110,7 @@ index 48ad1dd..df5a62b 100755
 +            "trq_predictor_mode": getattr(self.args, "trq_predictor_mode", "identity"),
 +            "trq_k_bits": getattr(self.args, "trq_k_bits", 0),
 +            "trq_v_bits": getattr(self.args, "trq_v_bits", 0),
++            "kv_cache_capacity_frames": requested_cache_frames,
 +        }
 +        for layer_idx in range(self.num_transformer_blocks):
              kv_cache1.append({

@@ -200,6 +200,10 @@ def run_one(
     validate_runtime(config)
     output = Path(manifest["output_dir"])
     output.mkdir(parents=True, exist_ok=True)
+    completed = [path for path in output.glob("*.mp4") if is_decodable_video(path)]
+    if completed:
+        print(f"[skip] decodable output already exists: {completed[0]}")
+        return
     manifest["created_at"] = datetime.now(timezone.utc).isoformat()
     manifest_path = output / "run_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -210,6 +214,25 @@ def run_one(
         str(source_root(config) / "experiments/HY-WorldPlay"),
     ])
     subprocess.run(command, cwd=source_root(config), env=env, check=True)
+
+
+def is_decodable_video(path: Path) -> bool:
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "csv=p=0",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0 and "video" in result.stdout.splitlines()
 
 
 def parse_args() -> argparse.Namespace:

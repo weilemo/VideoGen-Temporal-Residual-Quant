@@ -60,3 +60,17 @@ prepare_prompt_slice() {
   }
   printf '%s\n' "${destination}"
 }
+
+prepare_missing_causal_prompts() {
+  local start="$1"
+  local count="$2"
+  local name="$3"
+  local output_dir="$4"
+  local destination="${REPO_ROOT}/results/world_model_quant/inputs/${name}.txt"
+  python "${WORLD_MODEL_EXPERIMENT_DIR}/prepare_causal_prompts.py" \
+    --prompts "${REPO_ROOT}/integrations/evaluation/moviegen10.txt" \
+    --start "${start}" \
+    --count "${count}" \
+    --output-dir "${output_dir}" \
+    --destination "${destination}"
+}

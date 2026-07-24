@@ -23,11 +23,14 @@ cd /Users/moweile/Obsidian/Knowledge/Research/project/longvideo-kvcache-quant/co
 
 - 三基线实验统一入口：`experiments/world_model_quant/README.md`。
   - 2026-07-24 已完成三条基线、五档精度的 15 个 smoke 视频；
-  - 扩展计划已获批准，自动编排代码正在同步和启动；
+  - 扩展计划已获批准；`expansion_a_20260724` 的 Causal 21 帧五档各 3 条已完成；
+  - 42 帧 BF16 暴露固定 21 帧 KV cache 容量错误，恢复补丁使用
+    `kv_cache_capacity_frames=num_output_frames` 并增加写入边界诊断；
+  - 编排器按可解码视频续跑，Causal/HY/LongCat 独立记状态，信号退出按进程组清理；
   - GPU 0 已关闭，待批准方案使用 GPU 2/4；
   - Causal 先做 21/42/84 帧 length pilot，再跑 MovieGen10；
   - HY 使用官方 test cases 1-5 作为 dev、6-10 作为 holdout，不重复 demo 图；
-  - LongCat 计划拆为 prompts 0-4 与 5-9 两个互斥 shard；
+  - LongCat 拆为 prompts 0-4 与 5-9；恢复时先等待并接管已有 GPU 2 进程，禁止重复跑；
   - 本地推送后，远端只运行一次 `pull_remote_once.sh`，不启动同步轮询。
 
 - 2026-07-20 在线分叉计划已实现于 `codex/trq-online-causal-gates`：

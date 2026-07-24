@@ -29,9 +29,17 @@ mkdir -p "${log_root}"
 
 case "${baseline}" in
   causal_forcing)
-    prompts="$(prepare_prompt_slice "${limit}" "${start_index}" "causal_${run_id}_${start_index}_${limit}")"
     output_root="${REPO_ROOT}/results/world_model_quant/causal_forcing/${run_id}"
     for variant in "${VARIANTS[@]}"; do
+      prompts="$(prepare_missing_causal_prompts \
+        "${start_index}" "${limit}" \
+        "causal_${run_id}_${variant}_${start_index}_${limit}" \
+        "${output_root}/${variant}")"
+      if [[ ! -s "${prompts}" ]]; then
+        printf 'skip complete Causal generation: variant=%s start=%s count=%s\n' \
+          "${variant}" "${start_index}" "${limit}"
+        continue
+      fi
       PROMPTS="${prompts}" \
       OUTPUT_ROOT="${output_root}" \
       NUM_OUTPUT_FRAMES="${CAUSAL_FRAMES:-21}" \

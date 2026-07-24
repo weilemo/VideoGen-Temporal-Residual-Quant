@@ -9,6 +9,7 @@ pilot_prompts="${PILOT_PROMPTS:-3}"
 run_id="${RUN_ID:-length_pilot}"
 reuse_smoke_root="${CAUSAL_SMOKE_ROOT:-}"
 read -r -a lengths <<< "${CAUSAL_LENGTHS:-21 42 84}"
+failed=0
 
 for frames in "${lengths[@]}"; do
   output_root="${REPO_ROOT}/results/world_model_quant/causal_forcing/${run_id}/length_pilot/frames_${frames}"
@@ -36,10 +37,22 @@ for frames in "${lengths[@]}"; do
   if [[ "${count}" -eq 0 ]]; then
     continue
   fi
-  prompts="$(prepare_prompt_slice "${count}" "${start_index}" "causal_${run_id}_frames_${frames}_${start_index}_${count}")"
   for variant in "${VARIANTS[@]}"; do
-    PROMPTS="${prompts}" OUTPUT_ROOT="${output_root}" NUM_OUTPUT_FRAMES="${frames}" \
+    prompts="$(prepare_missing_causal_prompts \
+      "${start_index}" "${count}" \
+      "causal_${run_id}_frames_${frames}_${variant}_${start_index}_${count}" \
+      "${output_root}/${variant}")"
+    if [[ ! -s "${prompts}" ]]; then
+      printf 'skip complete Causal pilot: frames=%s variant=%s\n' "${frames}" "${variant}"
+      continue
+    fi
+    if ! PROMPTS="${prompts}" OUTPUT_ROOT="${output_root}" NUM_OUTPUT_FRAMES="${frames}" \
       bash "${REPO_ROOT}/integrations/causal_forcing/run_moviegen10.sh" "${variant}" \
-      2>&1 | tee "${log_root}/${variant}.log"
+      2>&1 | tee "${log_root}/${variant}.log"; then
+      failed=1
+      printf 'Causal pilot failed: frames=%s variant=%s\n' "${frames}" "${variant}" >&2
+    fi
   done
 done
+
+exit "${failed}"

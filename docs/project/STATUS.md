@@ -7,7 +7,7 @@
 
 ## 正在做什么
 
-- **三基线 TRQ smoke 已完成，扩展计划待批准（2026-07-24）**：
+- **三基线 TRQ smoke 已完成，扩展队列正在故障恢复（2026-07-24）**：
   - Causal Forcing 与 LongCat 使用 MovieGen10；HY-WorldPlay 使用多场景动作条件协议；
   - 五档精度统一为 BF16、TRQ INT4/INT2、packed-naive INT4/INT2；
   - `experiments/world_model_quant/` 提供 smoke、Causal 长度 pilot、两张 A100
@@ -18,6 +18,10 @@
     街景；HY 和 LongCat 中点帧未见灾难，但动作可控性、长时质量和统计指标仍未验证；
   - GPU 0 已关闭；使用 GPU 2/4 自动运行 MovieGen10、Causal length pilot 和 HY
     官方 10 场景 dev/holdout 协议，先启动 dev，holdout 仍需人工批准；
+  - `expansion_a_20260724` 已完成 Causal 21 帧五档各 3 条；42 帧 BF16 因 cache
+    容量仍固定为 21 帧而失败，GPU 4 已退出；GPU 2 的 LongCat 子进程继续保留结果；
+  - 修复将 cache 容量显式绑定 `num_output_frames`，并把编排改为可解码文件级恢复、
+    独立阶段状态与进程组清理；先通过 42/84 帧单 prompt gate 再恢复正式队列；
   - 远端代码同步改为 GitHub commit 后的一次性 fast-forward pull，不做远端轮询。
 
 - **仓库所有权边界已整理（2026-07-24）**：

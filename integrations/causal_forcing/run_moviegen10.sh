@@ -35,6 +35,7 @@ cd "${CAUSAL_REPO}"
   --data_path "${PROMPTS}" \
   --output_folder "${OUTPUT_ROOT}/${MODE}" \
   --num_output_frames "${NUM_OUTPUT_FRAMES:-21}" \
+  --kv_cache_capacity_frames "${KV_CACHE_CAPACITY_FRAMES:-${NUM_OUTPUT_FRAMES:-21}}" \
   --seed "${SEED:-42}" \
   --kv_quant_type "${QUANT_TYPE}" \
   --kv_quant_block_size "${KV_QUANT_BLOCK_SIZE:-64}" \

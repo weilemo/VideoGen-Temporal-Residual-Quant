@@ -16,6 +16,14 @@ sys.modules[SPEC.name] = prepare
 assert SPEC.loader is not None
 SPEC.loader.exec_module(prepare)
 
+CAUSAL_SPEC = importlib.util.spec_from_file_location(
+    "prepare_causal_prompts", ROOT / "prepare_causal_prompts.py"
+)
+causal_prepare = importlib.util.module_from_spec(CAUSAL_SPEC)
+sys.modules[CAUSAL_SPEC.name] = causal_prepare
+assert CAUSAL_SPEC.loader is not None
+CAUSAL_SPEC.loader.exec_module(causal_prepare)
+
 
 def test_official_hy_cases_split_into_fixed_dev_and_holdout(tmp_path):
     csv_path = tmp_path / "test_case.csv"
@@ -69,8 +77,9 @@ def test_two_gpu_dry_run_uses_gpu_2_and_4_without_execution(tmp_path):
 
     assert "GPU 2" in result.stdout
     assert "GPU 4" in result.stdout
-    assert "prompts 1-4" in result.stdout
+    assert "prompts 0-4" in result.stdout
     assert "prompts 5-9" in result.stdout
+    assert "continue after a sibling failure" in result.stdout
     assert "No GPU commands executed" in result.stdout
 
 
@@ -86,3 +95,21 @@ def test_prompt_slice_selects_disjoint_longcat_shards(tmp_path):
     )
     left, right = result.stdout.strip().split("|", maxsplit=1)
     assert left != right
+
+
+def test_causal_resume_selects_only_missing_or_invalid_outputs(tmp_path, monkeypatch):
+    prompts = ["scene zero", "scene one", "scene two"]
+    output = tmp_path / "videos"
+    output.mkdir()
+    (output / causal_prepare.output_name(prompts[0])).write_bytes(b"complete")
+    (output / causal_prepare.output_name(prompts[1])).write_bytes(b"broken")
+    monkeypatch.setattr(
+        causal_prepare,
+        "is_decodable",
+        lambda path: path.name == causal_prepare.output_name(prompts[0]),
+    )
+
+    missing, reused = causal_prepare.select_missing(prompts, 0, 3, output)
+
+    assert reused == 1
+    assert missing == prompts[1:]

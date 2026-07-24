@@ -99,16 +99,16 @@ Causal length pilot 必须先确定后端允许且稳定的长度，再通过 `C
 每个场景固定 prompt、conditioning image 和 seed，分别执行 `turn_left`、
 `turn_right`、`forward` 和 `backward`。左右与前后分别构成两组反事实对。
 
-## GPU 2/4 扩展队列（待批准，尚未启动）
+## GPU 2/4 扩展队列与 2026-07-24 恢复计划
 
-GPU 0 已关闭。计划先让 GPU 2 执行 LongCat 前半 shard，同时让 GPU 4 顺序执行
+GPU 0 已关闭。GPU 2 执行 LongCat 前半 shard，同时让 GPU 4 顺序执行
 Causal length pilot、Causal MovieGen10 和 HY dev。GPU 4 完成上述队列后，再接手
 LongCat 后半 shard。LongCat smoke 实测单视频约 18 分钟，分 shard 能显著缩短墙钟
 时间；两个 shard 的 prompt index 和输出文件名必须互斥。
 
 | 顺序 | GPU 2 | GPU 4 | 进入下一步条件 |
 | --- | --- | --- | --- |
-| 0 | 不启动 | 不启动 | 用户批准本计划 |
+| 0 | 保留现有可解码输出 | 保留现有可解码输出 | 同一 `RUN_ID` 恢复，不覆盖结果 |
 | 1 | LongCat prompts 0-4 | Causal 21/42/84 length pilot | BF16 和 TRQ 输出非空、有限 |
 | 2 | 继续 LongCat 0-4 | Causal MovieGen10 x 5 modes | 选定并冻结正式帧数 |
 | 3 | 等待或做 CPU 评测 | HY dev 5 scenes x 4 actions x 5 modes | dev 人工 action review 完成 |
@@ -125,6 +125,21 @@ LongCat 后半 shard。LongCat smoke 实测单视频约 18 分钟，分 shard �
    可兼容 smoke 结果通过符号链接复用；
 5. Causal pilot 自动选择通过数量、非空和可解码工程门的最长帧数。人工质量审阅仍在
    生成完成后进行。
+
+首次 `expansion_a_20260724` 在 42 帧 BF16 写 cache 时暴露固定容量错误：官方适配
+沿用了 `32760 = 21 x 1560` token 容量，导致 42 帧写入区间超过 tensor。修复协议为：
+
+1. `kv_cache_capacity_frames` 默认等于 `num_output_frames`，BF16、TRQ 和 naive 使用
+   完全相同的逻辑容量；不通过启用 rolling window 改变实验变量；
+2. 先跑 42 帧 BF16 单 prompt，再跑五档单 prompt；随后对 84 帧重复同一 gate；
+3. BF16 84 帧必须记录峰值显存，超过 A100 80GB 时将 42 帧冻结为正式长度，不把
+   OOM 解释为量化质量失败；
+4. Causal、HY 和 LongCat 阶段各自记录 `running/done/failed`，一个 baseline 失败不再
+   终止其他 baseline；所有恢复都以 `ffprobe` 可解码为完成条件；
+5. 已完成的 Causal 21 帧 `3 prompts x 5 modes`、LongCat smoke 和扩展样本全部复用。
+
+当前实现采用 full-history cache 扩容，因为研究问题是完整历史 KV 的量化。固定窗口
+eviction 属于另一项消融，不能混入本轮 TRQ 与 naive 的主比较。
 
 Expansion A 的计划生成量为 210 个视频：Causal 50、LongCat 10 个 BF16 prefix 加
 50 个 continuation、HY dev 100。Causal length pilot 另计 45 个视频。HY holdout
