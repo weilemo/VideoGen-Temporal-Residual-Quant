@@ -11,6 +11,7 @@ dry_run="${DRY_RUN:-0}"
 log_root="${REPO_ROOT}/results/world_model_quant/logs/${run_id}/orchestrator"
 status_root="${REPO_ROOT}/results/world_model_quant/orchestration/${run_id}"
 hy_dataset_root="${HY_DATASET_ROOT:-${HOME}/storage/datasets/hy_worldplay_official}"
+hy_asset_source="${HY_ASSET_SOURCE:-}"
 hy_source="${HY_WORLDPLAY_SOURCE:-${REPO_ROOT}/references/quant-videogen}"
 longcat_smoke_root="${LONGCAT_SMOKE_ROOT:-}"
 causal_smoke_root="${CAUSAL_SMOKE_ROOT:-}"
@@ -74,7 +75,11 @@ seed_longcat_smoke() {
   done
 }
 
-python "${script_dir}/prepare_hy_official_scenes.py" --dataset-root "${hy_dataset_root}" \
+hy_prepare_args=(--dataset-root "${hy_dataset_root}")
+if [[ -n "${hy_asset_source}" ]]; then
+  hy_prepare_args+=(--source-dir "${hy_asset_source}")
+fi
+python "${script_dir}/prepare_hy_official_scenes.py" "${hy_prepare_args[@]}" \
   2>&1 | tee "${log_root}/prepare_hy_scenes.log"
 
 longcat_root="${REPO_ROOT}/results/world_model_quant/longcat/${run_id}"

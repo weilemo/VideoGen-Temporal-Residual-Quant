@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 import urllib.request
 from pathlib import Path
 
@@ -23,6 +24,16 @@ def download(url: str, destination: Path) -> None:
     if not payload:
         raise RuntimeError(f"empty download: {url}")
     destination.write_bytes(payload)
+
+
+def materialize(source: Path | None, url: str, destination: Path) -> None:
+    if source is not None:
+        if not source.is_file():
+            raise FileNotFoundError(f"missing official HY asset: {source}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        return
+    download(url, destination)
 
 
 def load_cases(csv_path: Path) -> list[dict[str, str]]:
@@ -64,15 +75,30 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument(
+        "--source-dir",
+        type=Path,
+        help="local checkout of the official HY-WorldPlay assets directory",
+    )
     args = parser.parse_args()
 
     root = args.dataset_root.expanduser().resolve()
     csv_path = root / "test_case.csv"
     image_dir = root / "img"
-    download(f"{args.base_url}/test_case.csv", csv_path)
+    source_dir = args.source_dir.expanduser().resolve() if args.source_dir else None
+    materialize(
+        source_dir / "test_case.csv" if source_dir else None,
+        f"{args.base_url}/test_case.csv",
+        csv_path,
+    )
     cases = load_cases(csv_path)
     for case in cases:
-        download(f"{args.base_url}/img/{case['image_name']}", image_dir / case["image_name"])
+        name = case["image_name"]
+        materialize(
+            source_dir / "img" / name if source_dir else None,
+            f"{args.base_url}/img/{name}",
+            image_dir / name,
+        )
 
     dev = root / "hy_scenes_dev.json"
     holdout = root / "hy_scenes_holdout.json"

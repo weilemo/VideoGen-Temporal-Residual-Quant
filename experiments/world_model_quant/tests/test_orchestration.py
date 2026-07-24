@@ -42,6 +42,17 @@ def test_official_hy_cases_split_into_fixed_dev_and_holdout(tmp_path):
     ]
 
 
+def test_materialize_can_use_official_local_checkout(tmp_path):
+    source = tmp_path / "official" / "img" / "case.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"official-image")
+    destination = tmp_path / "dataset" / "img" / "case.png"
+
+    prepare.materialize(source, "https://invalid.example/case.png", destination)
+
+    assert destination.read_bytes() == b"official-image"
+
+
 def test_two_gpu_dry_run_uses_gpu_2_and_4_without_execution(tmp_path):
     result = subprocess.run(
         ["bash", str(ROOT / "run_two_gpu_matrix.sh")],
