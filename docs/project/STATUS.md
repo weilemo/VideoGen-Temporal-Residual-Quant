@@ -22,6 +22,8 @@
     容量仍固定为 21 帧而失败，GPU 4 已退出；GPU 2 的 LongCat 子进程继续保留结果；
   - 修复将 cache 容量显式绑定 `num_output_frames`，并把编排改为可解码文件级恢复、
     独立阶段状态与进程组清理；先通过 42/84 帧单 prompt gate 再恢复正式队列；
+  - 修复后 42/84 帧五档单 prompt gate 均通过；84 帧四个量化模式峰值 CUDA 为
+    23.44-26.46 GB，恢复编排已接管既有 LongCat 并补齐剩余 Causal pilot；
   - 远端代码同步改为 GitHub commit 后的一次性 fast-forward pull，不做远端轮询。
 
 - **仓库所有权边界已整理（2026-07-24）**：

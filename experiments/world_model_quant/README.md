@@ -141,6 +141,21 @@ LongCat 后半 shard。LongCat smoke 实测单视频约 18 分钟，分 shard �
 当前实现采用 full-history cache 扩容，因为研究问题是完整历史 KV 的量化。固定窗口
 eviction 属于另一项消融，不能混入本轮 TRQ 与 naive 的主比较。
 
+2026-07-24 修复后单 prompt gate 实测：
+
+| 长度 | 模式 | 原生等价 cache | packed cache | 峰值 CUDA | 结果 |
+| --- | --- | ---: | ---: | ---: | --- |
+| 42 | BF16 | - | - | 未记录 | 通过、可解码 |
+| 42 | TRQ INT4 / INT2 | 12.08 GB | 3.27 / 2.26 GB | 未记录 | 均通过 |
+| 42 | naive INT4 / INT2 | 12.08 GB | 3.40 / 1.89 GB | 未记录 | 均通过 |
+| 84 | BF16 | - | - | 首次 gate 未记录 | 通过、可解码 |
+| 84 | TRQ INT4 / INT2 | 24.15 GB | 6.54 / 4.53 GB | 26.25 / 24.25 GB | 均通过 |
+| 84 | naive INT4 / INT2 | 24.15 GB | 6.79 / 3.77 GB | 26.46 / 23.44 GB | 均通过 |
+
+BF16 的 `native_cache_bytes` 为 0 是统计接口只汇总 packed cache，并不代表没有分配
+BF16 tensor；两次 BF16 gate 均完成且未 OOM。峰值字段是在首次 BF16 gate 后加入，
+正式矩阵剩余 BF16 prompt 会记录精确值。84 帧五档通过后，恢复队列已自动放行。
+
 Expansion A 的计划生成量为 210 个视频：Causal 50、LongCat 10 个 BF16 prefix 加
 50 个 continuation、HY dev 100。Causal length pilot 另计 45 个视频。HY holdout
 如获批准再追加 100 个视频。

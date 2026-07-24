@@ -27,6 +27,8 @@ cd /Users/moweile/Obsidian/Knowledge/Research/project/longvideo-kvcache-quant/co
   - 42 帧 BF16 暴露固定 21 帧 KV cache 容量错误，恢复补丁使用
     `kv_cache_capacity_frames=num_output_frames` 并增加写入边界诊断；
   - 编排器按可解码视频续跑，Causal/HY/LongCat 独立记状态，信号退出按进程组清理；
+  - 42/84 帧五档单 prompt gate 均已通过；恢复队列已自动接管旧 LongCat，并从
+    `expansion_a_20260724` 的缺失 Causal pilot prompt 继续；
   - GPU 0 已关闭，待批准方案使用 GPU 2/4；
   - Causal 先做 21/42/84 帧 length pilot，再跑 MovieGen10；
   - HY 使用官方 test cases 1-5 作为 dev、6-10 作为 holdout，不重复 demo 图；
