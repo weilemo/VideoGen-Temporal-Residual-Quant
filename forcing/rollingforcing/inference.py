@@ -8,7 +8,7 @@ import torch.distributed as dist
 from einops import rearrange
 from omegaconf import OmegaConf
 from collections import OrderedDict
-from torchvision.io import write_video
+import imageio.v3 as iio
 from tqdm import tqdm
 
 from pipeline import CausalInferencePipeline
@@ -19,11 +19,7 @@ from utils.misc import set_seed
 REPO_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = REPO_DIR / "configs" / "default_config.yaml"
 DEFAULT_MODEL_CONFIG_PATH = REPO_DIR / "configs" / "rolling_forcing_dmd.yaml"
-DEFAULT_ROLLING_FORCING_CKPT = Path(
-    "/mnt/users/moweile-20251213/models/huggingface/hub/"
-    "models--TencentARC--RollingForcing/snapshots/main/checkpoints/rolling_forcing_dmd.pt"
-)
-
+DEFAULT_ROLLING_FORCING_CKPT = Path.home() / "storage/models/RollingForcing/checkpoints/rolling_forcing_dmd.pt"
 
 def main(args):
     # Initialize distributed inference
@@ -43,6 +39,14 @@ def main(args):
     config = OmegaConf.load(args.config_path)
     default_config = OmegaConf.load(DEFAULT_CONFIG_PATH)
     config = OmegaConf.merge(default_config, config)
+    config.generator_ckpt = None
+    config.kv_quant_type = args.kv_quant_type
+    config.kv_quant_block_size = args.kv_quant_block_size
+    config.trq_anchor_bits = args.trq_anchor_bits
+    config.trq_predictor_stride = args.trq_predictor_stride
+    config.trq_predictor_mode = args.trq_predictor_mode
+    config.trq_k_bits = args.trq_k_bits
+    config.trq_v_bits = args.trq_v_bits
 
     if args.method is not None:
         config.method = getattr(config, args.method, {})
@@ -112,7 +116,17 @@ def main(args):
         sampled_noise = torch.randn([args.num_samples, args.num_latent_frames, num_channels, latent_height, latent_width], device=device, dtype=torch.bfloat16)
 
         meta = {}
-        meta.update({"rank": local_rank, "video_index": video_index})
+        meta.update({
+            "rank": local_rank,
+            "video_index": video_index,
+            "kv_quant_type": args.kv_quant_type,
+            "kv_quant_block_size": args.kv_quant_block_size,
+            "trq_anchor_bits": args.trq_anchor_bits,
+            "trq_predictor_stride": args.trq_predictor_stride,
+            "trq_predictor_mode": args.trq_predictor_mode,
+            "trq_k_bits": args.trq_k_bits,
+            "trq_v_bits": args.trq_v_bits,
+        })
 
         # Generate 126 frames
         video, _ = pipeline.inference_rolling_forcing(
@@ -136,7 +150,13 @@ def main(args):
                 video_path = os.path.join(args.output_path, f'{prompt[:100]}_{seed}_{sample_index}.mp4')
 
             os.makedirs(os.path.dirname(video_path), exist_ok=True)
-            write_video(video_path, video[sample_index], fps=args.fps)
+            frames = video[sample_index].clamp(0, 255).to(torch.uint8).numpy()
+            iio.imwrite(
+                video_path,
+                frames,
+                fps=args.fps,
+                codec="libx264",
+            )
 
     if dist.is_initialized():
         dist.barrier()
@@ -165,7 +185,15 @@ if __name__ == "__main__":
     parser.add_argument("--profile", action="store_true", default=False, help="Whether to profile the inference")
     parser.add_argument("--save_with_index", action="store_true", default=True, help="Whether to save the video using the index or prompt as the filename")
     parser.add_argument("--method", type=str, default="rollingforcing")
+    parser.add_argument("--kv_quant_type", choices=("none", "trq-int4", "trq-int2", "packed-naive-int4", "packed-naive-int2"), default="none")
+    parser.add_argument("--kv_quant_block_size", type=int, default=64)
+    parser.add_argument("--trq_anchor_bits", type=int, default=4)
+    parser.add_argument("--trq_predictor_stride", type=int, default=1560)
+    parser.add_argument("--trq_predictor_mode", type=str, default="identity")
+    parser.add_argument("--trq_k_bits", type=int, default=0)
+    parser.add_argument("--trq_v_bits", type=int, default=0)
     args = parser.parse_args()
+
 
     main(args)
 

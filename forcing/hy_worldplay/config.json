@@ -1,0 +1,25 @@
+{
+  "experiment_id": "moviegen10",
+  "source_root": "Quant-VideoGen",
+  "prompt": "experiments/world_model_quant/moviegen10.txt",
+  "image_path": "assets/hyworld.png",
+  "ar_model_path": "~/storage/models/HY-WorldPlay/wan_transformer",
+  "ckpt_path": "~/storage/models/HY-WorldPlay/wan_distilled_model/model.pt",
+  "seed": 0,
+  "num_chunks": 12,
+  "memory_frames": 48,
+  "temporal_context_size": 44,
+  "pred_latent_size": 4,
+  "quantization": {
+    "block_size": 64,
+    "cache_num_k_centroids": 256,
+    "cache_num_v_centroids": 256,
+    "kmeans_max_iters": 2,
+    "num_prq_stages": 1,
+    "trq_anchor_bits": 4,
+    "trq_predictor_stride": 880,
+    "trq_predictor_mode": "identity",
+    "trq_group_size": 64
+  },
+  "output_root": "results/world_model_quant/hy_worldplay"
+}

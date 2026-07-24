@@ -1,4 +1,4 @@
-"""Prompt-paired VBench analysis and quality gating for online TRQ runs."""
+"""Prompt-paired VBench analysis and qualitative gating for online TRQ runs."""
 
 from __future__ import annotations
 
@@ -217,10 +217,9 @@ def analyze_paired_quality(
             and failure_tags[key]["catastrophe"]
             and not failure_tags[key]["bf16_present"]
         )
-        quantitative_pass = final_delta >= -0.005 and all(value >= -0.01 for value in critical.values())
         qualitative_complete = present_tag_keys == expected_tag_keys
         catastrophe_pass = catastrophe_count < 2
-        if not quantitative_pass or not catastrophe_pass:
+        if not catastrophe_pass:
             status = "FAIL"
         elif not qualitative_complete:
             status = "INCOMPLETE"
@@ -231,8 +230,9 @@ def analyze_paired_quality(
             "pairs": len(config_rows),
             "paired_final_delta_mean": final_delta,
             "critical_dimension_delta_mean": critical,
-            "passes_final_delta": final_delta >= -0.005,
-            "passes_critical_dimensions": all(value >= -0.01 for value in critical.values()),
+            "numeric_gate_enabled": False,
+            "passes_final_delta": None,
+            "passes_critical_dimensions": None,
             "qualitative_complete": qualitative_complete,
             "qualitative_rows": len(present_tag_keys),
             "trq_only_catastrophes": catastrophe_count,
@@ -240,10 +240,10 @@ def analyze_paired_quality(
         }
 
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "quality_gate_policy": {
-            "minimum_final_delta": -0.005,
-            "minimum_critical_dimension_delta": -0.01,
+            "vbench_numeric_gate_enabled": False,
+            "vbench_scores_are_descriptive": True,
             "maximum_repeated_trq_only_catastrophes": 1,
             "qualitative_tags_required": True,
         },

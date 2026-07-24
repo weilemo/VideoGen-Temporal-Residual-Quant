@@ -35,9 +35,9 @@ from models.utils import (
     shard_latents_dim_across_sp,
     select_mem_frames_wan,
 )
-from quant_videogen.compress import get_quantize_fn, compress_kv_cache
-from quant_videogen.uncompress import uncompress_kv_cache
-from quant_videogen.kv_cache import ChunkedKVCache, offload_kv_cache_layer, onload_kv_cache_layer
+from trq.compress import get_quantize_fn, compress_kv_cache
+from trq.uncompress import uncompress_kv_cache
+from trq.kv_cache import ChunkedKVCache, offload_kv_cache_layer, onload_kv_cache_layer
 from hyvideo.utils.retrieval_context import generate_points_in_sphere
 from distributed.parallel_state import (
     get_sp_parallel_rank,

@@ -168,7 +168,7 @@ bash scripts/analysis/run_online_paired_rollout.sh
 bootstrap drift 判据。协议见
 [Online Paired Rollout](docs/online_paired_rollout.md)。
 
-2026-07-20 起的 absolute/boundary 指标、paired VBench quality gate、Delay/sink/
+2026-07-20 起的 absolute/boundary 指标、paired VBench 连续报告与人工 catastrophe gate、Delay/sink/
 Gradual、K/V/layer 因果干预、E4 protection gate 和 quality-gated 501/699 流程见
 [在线分叉因果实验](docs/online_causal_experiments.md)。
 

@@ -1,4 +1,6 @@
 import types
+import os
+from pathlib import Path
 from typing import List, Optional
 import torch
 from torch import nn
@@ -11,7 +13,10 @@ from wan.modules.t5 import umt5_xxl
 from wan.modules.causal_model import CausalWanModel
 
 
-WAN_MODEL_ROOT = "/mnt/public/pretrained_models/models--Wan-AI--Wan2.1-T2V-1.3B/snapshots/37ec512624d61f7aa208f7ea8140a131f93afc9a"
+WAN_MODEL_ROOT = os.environ.get(
+    "WAN_MODEL_ROOT",
+    str(Path.home() / "storage/models/Wan2.1-T2V-1.3B"),
+)
 
 
 class WanTextEncoder(torch.nn.Module):

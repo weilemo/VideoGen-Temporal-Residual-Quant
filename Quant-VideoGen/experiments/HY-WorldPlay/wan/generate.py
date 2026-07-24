@@ -354,6 +354,13 @@ if __name__ == "__main__":
     parser.add_argument("--cache_num_v_centroids", type=int, default=256, help="Number of K-Means centroids for V tensor")
     parser.add_argument("--kmeans_max_iters", type=int, default=100, help="Max iterations for K-Means clustering")
     parser.add_argument("--num_prq_stages", type=int, default=4, help="Number of PRQ stages for nstages-kmeans quantization")
+    parser.add_argument("--trq_anchor_bits", type=int, default=4)
+    parser.add_argument("--trq_predictor_stride", type=int, default=880)
+    parser.add_argument("--trq_predictor_mode", type=str, default="identity")
+    parser.add_argument("--trq_group_size", type=int, default=16)
+    parser.add_argument("--trq_k_bits", type=int, default=0)
+    parser.add_argument("--trq_v_bits", type=int, default=0)
+
 
     parser.add_argument(
         "--model_id",
@@ -473,6 +480,12 @@ if __name__ == "__main__":
                     "cache_num_v_centroids": args.cache_num_v_centroids,
                     "kmeans_max_iters": args.kmeans_max_iters,
                     "num_prq_stages": args.num_prq_stages,
+                    "trq_anchor_bits": args.trq_anchor_bits,
+                    "trq_predictor_stride": args.trq_predictor_stride,
+                    "trq_predictor_mode": args.trq_predictor_mode,
+                    "trq_group_size": args.trq_group_size,
+                    "trq_k_bits": args.trq_k_bits,
+                    "trq_v_bits": args.trq_v_bits,
                 }
 
                 input_dict = {

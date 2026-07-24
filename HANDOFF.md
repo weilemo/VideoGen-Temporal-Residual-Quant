@@ -25,7 +25,7 @@ cd /Users/moweile/Code/LAB/videoquant-trq
   - CPU E0：`scripts/analysis/reanalyze_existing_online_runs.sh`；
   - GPU E2/E3：`scripts/analysis/run_online_causal_diagnosis.sh`，只允许 GPU 2/3；
   - E4：`run_e4_candidates.sh` + `analyze_protection_gate.py`；
-  - E5：`run_quality_gated_long_rollout.sh`，183/501/699 分阶段且 quality gate 失败关闭。
+  - E5：`run_quality_gated_long_rollout.sh`，183/501/699 分阶段；VBench 数值仅报告，人工 catastrophe gate 未完成或失败时关闭。
 - 下一步不是继续改 codec，而是在 code-server 拉取本分支后先跑 E0/E1；E1 人工标签完整前不能启动 E5。
 - E6 不在本分支；只有质量 winner 冻结后才另开系统优化分支。
 

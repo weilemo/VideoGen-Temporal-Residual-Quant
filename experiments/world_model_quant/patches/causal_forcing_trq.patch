@@ -1,0 +1,259 @@
+diff --git a/inference.py b/inference.py
+index 44a826d..f025210 100755
+--- a/inference.py
++++ b/inference.py
+@@ -5,12 +5,14 @@ import os
+ from omegaconf import OmegaConf
+ from tqdm import tqdm
+ from torchvision import transforms
+-from torchvision.io import write_video
+ from einops import rearrange
+ import torch.distributed as dist
+ from torch.utils.data import DataLoader, SequentialSampler
+ from torch.utils.data.distributed import DistributedSampler
+ import json
++import imageio.v3 as iio
++
++from trq.backends.causal_forcing import packed_cache_bytes
+ 
+ from pipeline import (
+     CausalDiffusionInferencePipeline,
+@@ -32,6 +34,13 @@ parser.add_argument("--seed", type=int, default=0, help="Random seed")
+ parser.add_argument("--i2v", action="store_true", help="Whether to perform I2V (or T2V by default)")
+ parser.add_argument("--report_timing", action="store_true",
+                     help="Only tested on A800, for the Causal Forcing++ latency. Not make claims for other hardware like H100. For the result on H100, refer to the reported results in the Self Forcing paper.")
++parser.add_argument("--kv_quant_type", choices=("none", "trq-int4", "trq-int2", "packed-naive-int4", "packed-naive-int2"), default="none")
++parser.add_argument("--kv_quant_block_size", type=int, default=64)
++parser.add_argument("--trq_anchor_bits", type=int, default=4)
++parser.add_argument("--trq_predictor_stride", type=int, default=1560)
++parser.add_argument("--trq_predictor_mode", type=str, default="identity")
++parser.add_argument("--trq_k_bits", type=int, default=0)
++parser.add_argument("--trq_v_bits", type=int, default=0)
+ args = parser.parse_args()
+ 
+ # Initialize distributed inference
+@@ -57,6 +66,13 @@ torch.set_grad_enabled(False)
+ config = OmegaConf.load(args.config_path)
+ default_config = OmegaConf.load("configs/default_config.yaml")
+ config = OmegaConf.merge(default_config, config)
++config.kv_quant_type = args.kv_quant_type
++config.kv_quant_block_size = args.kv_quant_block_size
++config.trq_anchor_bits = args.trq_anchor_bits
++config.trq_predictor_stride = args.trq_predictor_stride
++config.trq_predictor_mode = args.trq_predictor_mode
++config.trq_k_bits = args.trq_k_bits
++config.trq_v_bits = args.trq_v_bits
+ 
+ # Initialize pipeline
+ if hasattr(config, 'denoising_step_list'):
+@@ -213,6 +229,21 @@ for i, batch_data in tqdm(enumerate(dataloader), disable=(local_rank != 0)):
+     pipeline.vae.model.clear_cache()
+ 
+     output_path = os.path.join(args.output_folder, f'{prompt[:100]}.mp4')
+-    write_video(output_path, video[0], fps=16)
++    iio.imwrite(
++        output_path,
++        video[0].clamp(0, 255).to(torch.uint8).numpy(),
++        fps=16,
++        codec="libx264",
++    )
++    if hasattr(pipeline, "kv_cache1"):
++        native_bytes, packed_bytes = packed_cache_bytes(pipeline.kv_cache1)
++        print(json.dumps({
++            "kv_quant_type": args.kv_quant_type,
++            "native_cache_bytes": native_bytes,
++            "packed_cache_bytes": packed_bytes,
++            "compression_ratio": (
++                native_bytes / packed_bytes if packed_bytes else 1.0
++            ),
++        }))
+ 
+        
+diff --git a/pipeline/causal_inference.py b/pipeline/causal_inference.py
+index 48ad1dd..df5a62b 100755
+--- a/pipeline/causal_inference.py
++++ b/pipeline/causal_inference.py
+@@ -2,6 +2,8 @@ from typing import List, Optional
+ import time
+ import torch
+ 
++from trq.backends.causal_forcing import create_cache, reset_cache_pair
++
+ from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
+ 
+ from demo_utils.memory import gpu, get_cuda_free_memory_gb, DynamicSwapInstaller, move_model_to_device_with_memory_preservation
+@@ -155,6 +157,7 @@ class CausalInferencePipeline(torch.nn.Module):
+                 self.crossattn_cache[block_index]["is_init"] = False
+             # reset kv cache
+             for block_index in range(len(self.kv_cache1)):
++                reset_cache_pair(self.kv_cache1[block_index])
+                 self.kv_cache1[block_index]["global_end_index"] = torch.tensor(
+                     [0], dtype=torch.long, device=noise.device)
+                 self.kv_cache1[block_index]["local_end_index"] = torch.tensor(
+@@ -346,12 +349,24 @@ class CausalInferencePipeline(torch.nn.Module):
+             # Use the default KV cache size
+             kv_cache_size = 32760
+ 
+-        for _ in range(self.num_transformer_blocks):
++        max_frames = kv_cache_size // self.frame_seq_length
++        quant_meta = {
++            "kv_quant_type": getattr(self.args, "kv_quant_type", "none"),
++            "kv_quant_block_size": getattr(self.args, "kv_quant_block_size", 64),
++            "trq_anchor_bits": getattr(self.args, "trq_anchor_bits", 4),
++            "trq_predictor_stride": getattr(self.args, "trq_predictor_stride", 1560),
++            "trq_predictor_mode": getattr(self.args, "trq_predictor_mode", "identity"),
++            "trq_k_bits": getattr(self.args, "trq_k_bits", 0),
++            "trq_v_bits": getattr(self.args, "trq_v_bits", 0),
++        }
++        for layer_idx in range(self.num_transformer_blocks):
+             kv_cache1.append({
+-                "k": torch.zeros([batch_size, kv_cache_size, 12, 128], dtype=dtype, device=device),
+-                "v": torch.zeros([batch_size, kv_cache_size, 12, 128], dtype=dtype, device=device),
++                "k": create_cache(batch_size, self.frame_seq_length, 12, 128, max_frames, dtype, device, quant_meta["kv_quant_type"]),
++                "v": create_cache(batch_size, self.frame_seq_length, 12, 128, max_frames, dtype, device, quant_meta["kv_quant_type"]),
+                 "global_end_index": torch.tensor([0], dtype=torch.long, device=device),
+-                "local_end_index": torch.tensor([0], dtype=torch.long, device=device)
++                "local_end_index": torch.tensor([0], dtype=torch.long, device=device),
++                "_trq_meta": quant_meta,
++                "_layer_idx": layer_idx,
+             })
+ 
+         self.kv_cache1 = kv_cache1  # always store the clean cache
+diff --git a/utils/wan_wrapper.py b/utils/wan_wrapper.py
+index 77f530d..ea40190 100755
+--- a/utils/wan_wrapper.py
++++ b/utils/wan_wrapper.py
+@@ -1,4 +1,6 @@
+ import types
++import os
++from pathlib import Path
+ from typing import List, Optional
+ import torch
+ from torch import nn
+@@ -11,6 +13,14 @@ from wan.modules.t5 import umt5_xxl
+ from wan.modules.causal_model import CausalWanModel
+ 
+ 
++WAN_MODEL_ROOT = Path(
++    os.environ.get(
++        "WAN_MODEL_ROOT",
++        str(Path.home() / "storage/models/Wan2.1-T2V-1.3B"),
++    )
++)
++
++
+ class WanTextEncoder(torch.nn.Module):
+     def __init__(self) -> None:
+         super().__init__()
+@@ -22,12 +32,12 @@ class WanTextEncoder(torch.nn.Module):
+             device=torch.device('cpu')
+         ).eval().requires_grad_(False)
+         self.text_encoder.load_state_dict(
+-            torch.load("wan_models/Wan2.1-T2V-1.3B/models_t5_umt5-xxl-enc-bf16.pth",
++            torch.load(WAN_MODEL_ROOT / "models_t5_umt5-xxl-enc-bf16.pth",
+                        map_location='cpu', weights_only=False)
+         )
+ 
+         self.tokenizer = HuggingfaceTokenizer(
+-            name="wan_models/Wan2.1-T2V-1.3B/google/umt5-xxl/", seq_len=512, clean='whitespace')
++            name=str(WAN_MODEL_ROOT / "google/umt5-xxl"), seq_len=512, clean='whitespace')
+ 
+     @property
+     def device(self):
+@@ -66,7 +76,7 @@ class WanVAEWrapper(torch.nn.Module):
+ 
+         # init model
+         self.model = _video_vae(
+-            pretrained_path="wan_models/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth",
++            pretrained_path=str(WAN_MODEL_ROOT / "Wan2.1_VAE.pth"),
+             z_dim=16,
+         ).eval().requires_grad_(False)
+ 
+@@ -125,9 +135,9 @@ class WanDiffusionWrapper(torch.nn.Module):
+ 
+         if is_causal:
+             self.model = CausalWanModel.from_pretrained(
+-                f"wan_models/{model_name}/", local_attn_size=local_attn_size, sink_size=sink_size)
++                str(WAN_MODEL_ROOT), local_attn_size=local_attn_size, sink_size=sink_size)
+         else:
+-            self.model = WanModel.from_pretrained(f"wan_models/{model_name}/")
++            self.model = WanModel.from_pretrained(str(WAN_MODEL_ROOT))
+         self.model.eval()
+ 
+         # For non-causal diffusion, all frames share the same timestep
+diff --git a/wan/modules/causal_model.py b/wan/modules/causal_model.py
+index 4b33c77..79c5302 100755
+--- a/wan/modules/causal_model.py
++++ b/wan/modules/causal_model.py
+@@ -17,6 +17,14 @@ import torch
+ import math
+ import torch.distributed as dist
+ 
++from trq.backends.causal_forcing import (
++    cache_size,
++    evict_cache_pair,
++    quantize_cache_pair,
++    read_cache,
++    write_cache,
++)
++
+ # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
+ # see https://github.com/pytorch/pytorch/issues/133254
+ # change to default for other models
+@@ -205,7 +213,7 @@ class CausalWanSelfAttention(nn.Module):
+             current_end = current_start + roped_query.shape[1]
+             sink_tokens = self.sink_size * frame_seqlen
+             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
+-            kv_cache_size = kv_cache["k"].shape[1]
++            kv_cache_size = cache_size(kv_cache["k"])
+             num_new_tokens = roped_query.shape[1]
+             if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
+                     num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
+@@ -213,27 +221,36 @@ class CausalWanSelfAttention(nn.Module):
+                 # Shift existing cache content left to discard oldest tokens
+                 # Clone the source slice to avoid overlapping memory error
+                 num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
+-                num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
+-                kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+-                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+-                kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+-                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
++                evict_cache_pair(
++                    kv_cache,
++                    num_tokens=num_evicted_tokens,
++                    sink_tokens=sink_tokens,
++                    local_end_index=kv_cache["local_end_index"].item(),
++                )
+                 # Insert the new keys/values at the end
+                 local_end_index = kv_cache["local_end_index"].item() + current_end - \
+                     kv_cache["global_end_index"].item() - num_evicted_tokens
+                 local_start_index = local_end_index - num_new_tokens
+-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+-                kv_cache["v"][:, local_start_index:local_end_index] = v
++                write_cache(kv_cache["k"], local_start_index, local_end_index, roped_key)
++                write_cache(kv_cache["v"], local_start_index, local_end_index, v)
+             else:
+                 # Assign new keys/values directly up to current_end
+                 local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
+                 local_start_index = local_end_index - num_new_tokens
+-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+-                kv_cache["v"][:, local_start_index:local_end_index] = v
++                write_cache(kv_cache["k"], local_start_index, local_end_index, roped_key)
++                write_cache(kv_cache["v"], local_start_index, local_end_index, v)
++            quantize_cache_pair(
++                kv_cache,
++                local_start_index,
++                local_end_index,
++                meta=kv_cache.get("_trq_meta", {}),
++                layer_idx=int(kv_cache.get("_layer_idx", 0)),
++            )
++            cache_read_start = max(0, local_end_index - self.max_attention_size)
+             x = attention(
+                 roped_query,
+-                kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
+-                kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
++                read_cache(kv_cache["k"], cache_read_start, local_end_index),
++                read_cache(kv_cache["v"], cache_read_start, local_end_index),
+             )
+             kv_cache["global_end_index"].fill_(current_end)
+             kv_cache["local_end_index"].fill_(local_end_index)

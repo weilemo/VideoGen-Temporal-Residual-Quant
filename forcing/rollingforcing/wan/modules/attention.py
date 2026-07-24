@@ -1,5 +1,6 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import torch
+import torch.nn.functional as F
 
 try:
     import flash_attn_interface
@@ -114,8 +115,7 @@ def flash_attention(
             softmax_scale=softmax_scale,
             causal=causal,
             deterministic=deterministic)[0].unflatten(0, (b, lq))
-    else:
-        assert FLASH_ATTN_2_AVAILABLE
+    elif FLASH_ATTN_2_AVAILABLE:
         x = flash_attn.flash_attn_varlen_func(
             q=q,
             k=k,
@@ -131,6 +131,27 @@ def flash_attention(
             causal=causal,
             window_size=window_size,
             deterministic=deterministic).unflatten(0, (b, lq))
+    else:
+        outputs = []
+        q_offset = 0
+        k_offset = 0
+        for q_len, k_len in zip(q_lens.tolist(), k_lens.tolist()):
+            query = q[q_offset:q_offset + q_len].transpose(0, 1).unsqueeze(0)
+            key = k[k_offset:k_offset + k_len].transpose(0, 1).unsqueeze(0)
+            value = v[k_offset:k_offset + k_len].transpose(0, 1).unsqueeze(0)
+            output = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                dropout_p=dropout_p,
+                is_causal=causal,
+                scale=softmax_scale,
+                enable_gqa=query.size(1) != key.size(1),
+            )
+            outputs.append(output.squeeze(0).transpose(0, 1))
+            q_offset += q_len
+            k_offset += k_len
+        x = torch.cat(outputs).unflatten(0, (b, lq))
 
     # output
     return x.type(out_dtype)

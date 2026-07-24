@@ -9,7 +9,7 @@
 
 - **TRQ 在线分叉 E0-E5 实验框架已落地（2026-07-20）**：
   - E0 新增 absolute metrics、真实 boundary jump、事件标线曲线和 prompt heatmap；
-  - E1 新增逐 prompt/seed paired VBench、latent-quality Spearman、人工 failure tags 和 fail-closed quality gate；
+  - E1 新增逐 prompt/seed paired VBench、latent-quality Spearman 和人工 failure tags；2026-07-22 起取消 VBench 数值硬阈值，只保留人工 catastrophe gate；
   - E2/E3 支持 Delay-48/72、BF16 sink、Gradual-3、K-only/V-only、layer groups 和 sampled attention trace；
   - E4 gate 同时检查质量、相对 K2V2 的 boundary-jump 降幅和 actual KV saving；
   - E5 的 183/501/699 分阶段执行，501/699 不再由 latent gate 自动放行；

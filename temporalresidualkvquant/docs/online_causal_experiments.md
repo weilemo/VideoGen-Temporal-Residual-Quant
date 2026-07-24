@@ -77,7 +77,7 @@ python scripts/eval/create_paired_review.py \
 ```
 
 必须人工填写 `failure_tags.csv` 中的 `catastrophe` 和 `bf16_present`。空白行
-不算完成，quality gate 会保持 `INCOMPLETE`。
+不算完成，qualitative gate 会保持 `INCOMPLETE`。
 
 聚合示例：
 
@@ -91,12 +91,16 @@ python scripts/analysis/analyze_paired_quality.py \
   --output-dir /path/to/e1_analysis
 ```
 
-`quality_gate.json` 只有同时满足以下条件才给出 `PASS`：
+从 2026-07-22 起，VBench 数值只作为连续指标报告，不再设置 Final 或关键维度
+的硬 pass/fail 阈值。`quality_gate.json` 的状态只由人工定性完整性和 catastrophe
+决定：
 
-- paired Final mean delta 不低于 `-0.005`；
-- subject/background/motion mean delta 均不低于 `-0.01`；
 - TRQ 独有且可复现的 catastrophe 少于 2 个 pair；
 - 每条 pair 已有明确人工判读。
+
+原预注册的 Final `-0.005` 与关键维度 `-0.01` 仍保留在历史周报中，不能用新协议
+追溯性改写为“原 gate 通过”。新分析继续输出 paired Final、各维度 delta、逐 seed
+和逐 prompt 分布，用于排序、风险定位和扩样决策。
 
 ## 4. E2/E3：因果干预
 
@@ -175,7 +179,7 @@ TRQ_K_BITS=8 TRQ_V_BITS=2 \
 ```
 
 501 完成后会按 latent window 180、stride 90 准备视频片段和 manifest。对这些
-窗口完成 paired VBench 与人工判读后，只有 501 quality gate 为 `PASS` 才能启动：
+窗口完成 paired VBench 与人工判读后，只有 501 人工 catastrophe gate 为 `PASS` 才能启动：
 
 ```bash
 GPU_ID=3 STAGE=699 WINNER_CONFIG=p1_k8v2 \

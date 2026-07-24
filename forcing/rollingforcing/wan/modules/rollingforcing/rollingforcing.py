@@ -2,6 +2,13 @@ import math
 import torch
 from wan.modules.attention import attention
 from .utils import causal_rope_apply
+from trq.backends.rolling_forcing import (
+    cache_size,
+    evict_cache_pair,
+    quantize_cache_pair,
+    read_cache,
+    write_cache,
+)
 
 def rollingforcing(kv_cache, q, k, v, grid_sizes, freqs, current_start, cache_start, updating_cache, meta):
     num_frame_per_block = meta["num_frame_per_block"]
@@ -57,6 +64,14 @@ def rollingforcing(kv_cache, q, k, v, grid_sizes, freqs, current_start, cache_st
 
     if num_new_tokens > 0: # prevent updating when caching clean frame
         kv_cache["global_end_index"].fill_(cache_end)
+    if num_new_tokens > 0:
+        quantize_cache_pair(
+            kv_cache,
+            local_start_index,
+            local_end_index,
+            meta=meta,
+            layer_idx=int(meta.get("block_index", 0)),
+        )
         kv_cache["local_end_index"].fill_(local_end_index)
 
     if local_start_index == 0:

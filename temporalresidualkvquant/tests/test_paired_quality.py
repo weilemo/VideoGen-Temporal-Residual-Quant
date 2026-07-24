@@ -24,16 +24,18 @@ class PairedQualityTests(TestCase):
             self.assertEqual(summary["configs"]["k4v4"]["status"], "INCOMPLETE")
             self.assertTrue((root / "analysis" / "paired_vbench.csv").exists())
 
-    def test_complete_tags_and_small_delta_pass(self):
+    def test_complete_tags_pass_without_numeric_threshold(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            runs = self._write_runs(root, candidate_delta=-0.001)
+            runs = self._write_runs(root, candidate_delta=-0.2)
             tags = root / "tags.csv"
             self._write_tags(tags, catastrophe=False)
 
             _, _, summary = analyze_paired_quality(runs, failure_tags_path=tags)
 
             self.assertEqual(summary["configs"]["k4v4"]["status"], "PASS")
+            self.assertFalse(summary["quality_gate_policy"]["vbench_numeric_gate_enabled"])
+            self.assertIsNone(summary["configs"]["k4v4"]["passes_final_delta"])
 
     def test_two_trq_only_catastrophes_fail(self):
         with TemporaryDirectory() as directory:

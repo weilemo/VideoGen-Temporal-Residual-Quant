@@ -1,0 +1,23 @@
+{
+  "actions": {
+    "canonical": "w-8,s-8,a-8,d-8,up-8,down-8",
+    "turn_left": "w-8,a-8,w-8",
+    "turn_right": "w-8,d-8,w-8",
+    "forward": "w-8,w-8,w-8",
+    "backward": "s-8,s-8,s-8"
+  },
+  "counterfactual_pairs": [
+    {
+      "id": "steering",
+      "left": "turn_left",
+      "right": "turn_right",
+      "question": "Does quantization preserve the opposite steering response?"
+    },
+    {
+      "id": "longitudinal",
+      "left": "forward",
+      "right": "backward",
+      "question": "Does quantization preserve the opposite longitudinal response?"
+    }
+  ]
+}
