@@ -1,58 +1,53 @@
 # Workspace Structure
 
-`temporalresidualkvquant` is the active method workspace inside the local
-`videoquant-trq` repository.
-
-## Current Local Layout
-
-```text
-/Users/moweile/Code/LAB/
-  videoquant-trq/      # active unified repository
-  qvg/                 # junior S2++ repository, reference only
-```
-
+The repository separates method code, baseline glue, experiment protocols, and
+upstream provenance so a backend can change without creating a second TRQ
+implementation.
 
 ```text
 videoquant-trq/
 ├── temporalresidualkvquant/
-│   ├── src/trq/                  # paper-facing quantization method
-│   ├── backends/self_forcing/    # vendored Self-Forcing model and pipeline
-│   ├── scripts/self_forcing/     # experiment launchers
-│   ├── assets/t2v.txt            # default prompts
-│   ├── ckpts/Self-Forcing/       # optional local checkpoints, ignored by git
-│   ├── outputs/self_forcing/     # generated videos and logs, ignored by git
-│   └── docs/
-└── Quant-VideoGen/
-    ├── quant_videogen/           # original QVG paper code, retained as reference
-    └── experiments/Self-Forcing/ # original backend source, copied into HWQ
+│   ├── src/trq/                 # sole owner of TRQ algorithms
+│   ├── src/trq/backends/        # backend-neutral runtime adapters
+│   ├── backends/self_forcing/   # vendored Self-Forcing runtime
+│   ├── scripts/                 # method and Self-Forcing launchers
+│   └── tests/
+├── integrations/
+│   ├── causal_forcing/          # setup patch and MovieGen10 launcher
+│   ├── hy_worldplay/            # action config, runner, and tests
+│   ├── longcat_video/           # clone/setup patch and launcher
+│   ├── rolling_forcing/         # MovieGen10 launcher
+│   └── evaluation/              # shared prompts and VBench runner
+├── experiments/
+│   └── paired_quality/           # PSNR, SSIM, and LPIPS orchestration
+├── references/
+│   ├── quant-videogen/           # read-only QVG snapshot
+│   └── focused-forcing-code/     # read-only forcing snapshots
+├── forcing/                      # legacy runtime snapshots pending migration
+└── docs/
 ```
 
-The split is intentional:
+## Placement Rules
 
-- `temporalresidualkvquant` owns head-wise quantization research code.
-- `temporalresidualkvquant/backends/self_forcing` owns the active Self-Forcing backend used by HWQ launchers.
-- `Quant-VideoGen` is retained as original source/reference.
-- QVG's original `quant_videogen` package is kept for reference and baseline comparison.
-- New head-wise policies should be added under `temporalresidualkvquant/src/trq/`, not under `Quant-VideoGen/quant_videogen/`.
-- Temporal residual quantization is owned by `src/trq/real/trq.py`. Within the
-  active HWQ package, `real/hrq.py` and `real/s2pp.py` are compatibility
-  adapters only. QVG's original S2++ stays reference-only; do not develop a
-  second active codec implementation under either legacy name.
+- Put quantizers, cache data structures, policies, and diagnostics in
+  `temporalresidualkvquant/src/trq/`.
+- Put a baseline's argument mapping, monkey patch, source patch, and launcher in
+  `integrations/<baseline>/`.
+- Put protocols shared by multiple baselines in `experiments/`.
+- Keep upstream snapshots unchanged under `references/`; record necessary
+  upstream edits as patches under `integrations/`.
+- Keep checkpoints and generated results outside tracked source directories.
 
-Run the CPU smoke test from `temporalresidualkvquant` first:
+Self-Forcing remains vendored under `temporalresidualkvquant/backends/` for now.
+The other large upstream runtimes are installed on the remote GPU runner and
+are connected through the integration contracts.
+
+## Validation Order
 
 ```bash
-python -m pip install -e .
+cd temporalresidualkvquant
 python -m unittest discover -s tests -v
 ```
 
-Then follow [`getting_started.md`](getting_started.md) for Self-Forcing BF16
-and TRQ generation.
-
-Use `SELF_FORCING_CKPT_ROOT` when checkpoints are not under
-`temporalresidualkvquant/ckpts/Self-Forcing`:
-
-```bash
-SELF_FORCING_CKPT_ROOT=/mnt/workspace/caipeiliang/code/moweile/videoquant/Quant-VideoGen/ckpts/Self-Forcing \
-  bash scripts/self_forcing/run_random_hwq.sh
-```
+Then run the selected integration's dry run or smoke test remotely. A backend is
+not considered ready merely because its adapter imports locally.

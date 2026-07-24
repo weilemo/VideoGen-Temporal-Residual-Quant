@@ -10,7 +10,7 @@ cd /path/to/videoquant-trq/temporalresidualkvquant
 git status --short --branch
 ```
 
-只在这个目录开发 TRQ。仓库内 `Quant-VideoGen/` 和仓库外 `qvg/` 用于查看原始
+只在这个目录开发 TRQ。仓库内 `references/quant-videogen/` 和仓库外 `qvg/` 用于查看原始
 QVG、PRQ、S2++ 机制，不参与当前运行。
 
 主要修改位置：

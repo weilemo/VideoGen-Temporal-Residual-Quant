@@ -49,7 +49,7 @@ temporalresidualkvquant/
 └── tests/                    # CPU codec 与集成单元测试
 ```
 
-旁边的 `Quant-VideoGen/` 和 `/Users/moweile/Code/LAB/qvg` 都是参考实现，
+`references/quant-videogen/` 和仓库外的 `qvg` 都是参考实现，
 不是当前运行依赖。不要在其中新增第二套 TRQ codec。
 
 ## 安装与 CPU 冒烟

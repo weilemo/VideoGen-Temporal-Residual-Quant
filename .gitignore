@@ -11,6 +11,10 @@ outputs/
 logs/
 checkpoints/
 runs/
+runtime/
+forcing/longcatvideo/
+forcing/hy_worldplay/
+*.egg-info/
 temporalresidualkvquant/ckpts/
 temporalresidualkvquant/outputs/
 temporalresidualkvquant/results/

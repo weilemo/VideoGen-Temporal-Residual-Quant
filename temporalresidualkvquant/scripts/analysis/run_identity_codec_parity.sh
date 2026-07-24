@@ -14,7 +14,7 @@ dumps_glob="${DUMPS_GLOB:-${trq_root}/kv_dumps/trq_diagnostics/*/heldout/*.pt}"
 
 export PYTHONPATH="${trq_root}/src:${PYTHONPATH:-}"
 
-if [ ! -f "${qvg_root}/Quant-VideoGen/quant_videogen/real/s2pp.py" ]; then
+if [ ! -f "${qvg_root}/references/quant-videogen/quant_videogen/real/s2pp.py" ]; then
   echo "ERROR: Student QVG checkout not found at ${qvg_root}" >&2
   echo "Clone it with: git clone https://github.com/jiahui1021/qvg.git ${qvg_root}" >&2
   exit 1

@@ -55,4 +55,5 @@
 - 实验启动前先写「本周目标」和预期对比。
 - 实验完成后及时补充配置、结果路径和一句话结论。
 - 每周汇报前重点更新「主要发现」「遇到的问题」「希望老师指导」。
-- 和长期状态同步：重要结论继续写入仓库根目录的 `STATUS.md`、`DECISIONS.md` 或 `logs/`。
+- 和长期状态同步：重要结论继续写入 `docs/project/STATUS.md`、
+  `docs/project/DECISIONS.md` 或 `docs/history/`。

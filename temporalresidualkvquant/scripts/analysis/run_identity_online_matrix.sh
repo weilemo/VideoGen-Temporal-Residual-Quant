@@ -15,7 +15,7 @@ seed="${SEED:-0}"
 gpu_ids="${GPU_IDS:-0}"
 implementations="${IMPLEMENTATIONS:-trq,student}"
 profiles="${PROFILES:-mine:2:4:64:1560,student:2:4:64:448}"
-student_root="${qvg_root}/Quant-VideoGen"
+student_root="${qvg_root}/references/quant-videogen"
 student_ckpt="${STUDENT_CKPT_PATH:-${CKPT_PATH:-${SELF_FORCING_CKPT_ROOT:-${trq_root}/ckpts/Self-Forcing}/self_forcing_dmd.pt}}"
 student_wan_dir="${FORCING_WAN_MODEL_DIR:-${SELF_FORCING_CKPT_ROOT:-${trq_root}/ckpts/Self-Forcing}/Wan2.1-T2V-1.3B}"
 

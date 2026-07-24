@@ -1,0 +1,66 @@
+diff --git a/longcat_video/modules/attention.py b/longcat_video/modules/attention.py
+index bb5630f..e0d418c 100644
+--- a/longcat_video/modules/attention.py
++++ b/longcat_video/modules/attention.py
+@@ -1,7 +1,10 @@
+ from typing import List, Optional
+ 
++import importlib.util
++
+ import torch
+ import torch.nn as nn
++import torch.nn.functional as F
+ 
+ from einops import rearrange
+ 
+@@ -77,7 +80,7 @@ class Attention(nn.Module):
+                 softmax_scale=self.scale,
+             )
+             x = rearrange(x, "B S H D -> B H S D")
+-        elif self.enable_flashattn2:
++        elif self.enable_flashattn2 and importlib.util.find_spec("flash_attn") is not None:
+             from flash_attn import flash_attn_func
+             q = rearrange(q, "B H S D -> B S H D")
+             k = rearrange(k, "B H S D -> B S H D")
+@@ -100,7 +103,9 @@ class Attention(nn.Module):
+             x = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None, op=None,)
+             x = rearrange(x, "B M H K -> B H M K")
+         else:
+-            raise RuntimeError("Unsupported attention operations.")
++            x = F.scaled_dot_product_attention(
++                q, k, v, dropout_p=0.0, scale=self.scale
++            )
+ 
+         return x
+ 
+@@ -229,7 +234,7 @@ class MultiHeadCrossAttention(nn.Module):
+                 max_seqlen_q=N,
+                 max_seqlen_k=max(kv_seqlen),
+             )[0]
+-        elif self.enable_flashattn2:
++        elif self.enable_flashattn2 and importlib.util.find_spec("flash_attn") is not None:
+             from flash_attn import flash_attn_varlen_func
+             x = flash_attn_varlen_func(
+                 q=q[0],
+@@ -245,7 +250,20 @@ class MultiHeadCrossAttention(nn.Module):
+             attn_bias = xformers.ops.fmha.attn_bias.BlockDiagonalMask.from_seqlens([N] * B, kv_seqlen)
+             x = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=attn_bias)
+         else:
+-            raise RuntimeError("Unsupported attention operations.")
++            outputs = []
++            q_offset = 0
++            k_offset = 0
++            for k_len in kv_seqlen:
++                q_item = q[0, q_offset:q_offset + N].transpose(0, 1).unsqueeze(0)
++                k_item = k[0, k_offset:k_offset + k_len].transpose(0, 1).unsqueeze(0)
++                v_item = v[0, k_offset:k_offset + k_len].transpose(0, 1).unsqueeze(0)
++                output = F.scaled_dot_product_attention(
++                    q_item, k_item, v_item, dropout_p=0.0
++                )
++                outputs.append(output.squeeze(0).transpose(0, 1))
++                q_offset += N
++                k_offset += k_len
++            x = torch.cat(outputs, dim=0)
+ 
+ 
+         x = x.view(B, -1, C)
