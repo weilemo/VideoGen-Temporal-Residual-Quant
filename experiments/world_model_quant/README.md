@@ -17,20 +17,26 @@
 | --- | --- | --- | --- |
 | Causal Forcing | MovieGen10 | 10 prompts x 5 modes = 50 videos | 因果边界跳变和长期漂移 |
 | LongCat | MovieGen10 | 10 个固定 BF16 prefix + 10 continuations x 5 modes | 续写阶段的量化退化 |
-| HY-WorldPlay | 5 个 conditioning scenes | 5 scenes x 4 actions x 5 modes = 100 videos | 动作与反事实可控性 |
+| HY-WorldPlay dev | 官方 test cases 1-5 | 5 scenes x 4 actions x 5 modes = 100 videos | 动作与反事实可控性 |
+| HY-WorldPlay holdout | 官方 test cases 6-10 | dev 通过后追加 100 videos | 独立场景确认 |
 
 不能横向比较三种模型的绝对 VBench。报告各模型相对自身 BF16 的下降量。
 PSNR、SSIM 和 LPIPS 是同输入、同 seed 下的轨迹一致性指标，不是绝对视频质量。
 
 ## 执行阶段与准入门
 
-1. Smoke：每条基线用一个输入跑完五档精度。检查视频非空、没有静默回退
-   BF16，并在后端支持时检查 packed cache、实际字节数和有限的显存统计。
-2. Pilot：Causal Forcing 用三个 prompt 测试递增长度；人工检查首次量化边界和
-   LongCat continuation 接缝。
-3. Full：运行上表矩阵，再计算配对指标、VBench 和动作代理指标。
-4. Review：逐样本盲审 identity switch、background jump、motion freeze、
-   color drift、black/NaN 等灾难现象。
+1. Smoke（已完成，2026-07-24）：每条基线用一个输入跑完五档精度，共 15 个
+   对比视频。三条 backend 均产生真实 packed cache 和非空视频；人工中点帧检查发现
+   Causal packed-naive INT2 已出现结构崩坏，而 TRQ INT2 保留主体和街景。HY 与
+   LongCat 未见中点帧灾难，但尚未建立动作可控性或长时质量结论。
+2. Causal length pilot：用三个 prompt 跑 21/42/84 帧和五档精度。选择最长的稳定
+   长度作为正式矩阵长度；若 BF16 自身失败，则该长度无效。
+3. Expansion A：Causal 和 LongCat 跑 MovieGen10；HY 跑官方 test cases 1-5 的
+   四动作五精度矩阵。生成后立即计算配对指标并人工审阅。
+4. Expansion B：只有 HY dev 没有新增 TRQ-only 动作反转或灾难时，才在官方
+   test cases 6-10 上复现同一矩阵。holdout 不用于调参。
+5. Review：逐样本盲审 identity switch、background jump、motion freeze、
+   color drift、action reversal、black/NaN 等灾难现象。
 
 同 bit 下，只有当 TRQ 的配对指标优于 naive，并且没有新增 TRQ-only catastrophe
 时，才认为方法通过。VBench 数值只做描述，不单独充当硬门槛。10 个 prompt 只报告
@@ -55,10 +61,10 @@ bash experiments/world_model_quant/pull_remote_once.sh codex/trq-online-causal-g
 
 ```bash
 GPU=2 bash experiments/world_model_quant/run_generation.sh longcat smoke
-GPU=3 bash experiments/world_model_quant/run_generation.sh causal_forcing smoke
-GPU=3 bash experiments/world_model_quant/run_generation.sh hy_worldplay smoke
+GPU=4 bash experiments/world_model_quant/run_generation.sh causal_forcing smoke
+GPU=4 bash experiments/world_model_quant/run_generation.sh hy_worldplay smoke
 
-GPU=3 CAUSAL_LENGTHS="21 42 84" \
+GPU=4 CAUSAL_LENGTHS="21 42 84" \
   bash experiments/world_model_quant/run_causal_length_pilot.sh
 ```
 
@@ -67,9 +73,15 @@ Causal length pilot 必须先确定后端允许且稳定的长度，再通过 `C
 
 ## HY 场景清单
 
-`hy_scenes.example.json` 只包含上游 demo，用于 smoke。正式矩阵需要在远端准备至少
-5 个代表性 conditioning scenes。图片路径相对 `HY_WORLDPLAY_SOURCE` 解析，图片本身
-不进入 Git。
+`hy_scenes.example.json` 只包含 Quant-VideoGen 上游 demo，用于 smoke，不能把同一张
+图复制五次冒充扩大数据集。正式场景来自 HY-WorldPlay 官方仓库的
+[`assets/test_case.csv`](https://github.com/Tencent-Hunyuan/HY-WorldPlay/blob/main/assets/test_case.csv)
+和对应的 `assets/img/1.png` 至 `assets/img/10.png`。官方清单覆盖游戏、城市、海岸、
+森林、麦田、外星地貌、雪景和城堡等不同场景。
+
+- dev：固定使用官方 1-5，允许依据其结果检查实现和协议；
+- holdout：固定使用官方 6-10，只在 dev 通过后运行，不据其结果回改参数；
+- 图片和远端 manifest 属于运行资产，不提交模型权重或生成视频到 Git。
 
 ```json
 {
@@ -87,16 +99,41 @@ Causal length pilot 必须先确定后端允许且稳定的长度，再通过 `C
 每个场景固定 prompt、conditioning image 和 seed，分别执行 `turn_left`、
 `turn_right`、`forward` 和 `backward`。左右与前后分别构成两组反事实对。
 
-## 两张 A100 的正式队列
+## GPU 2/4 扩展队列（待批准，尚未启动）
 
-LongCat 独占一张 A100；Causal Forcing 和 HY-WorldPlay 在另一张卡上顺序执行。
-脚本只等待自己启动的进程，不轮询 GitHub 或远端目录。
+GPU 0 已关闭。计划先让 GPU 2 执行 LongCat 前半 shard，同时让 GPU 4 顺序执行
+Causal length pilot、Causal MovieGen10 和 HY dev。GPU 4 完成上述队列后，再接手
+LongCat 后半 shard。LongCat smoke 实测单视频约 18 分钟，分 shard 能显著缩短墙钟
+时间；两个 shard 的 prompt index 和输出文件名必须互斥。
 
-```bash
-HY_SCENES=/remote/path/hy_scenes.json \
-LONGCAT_GPU=2 SECONDARY_GPU=3 \
-  bash experiments/world_model_quant/run_two_gpu_matrix.sh
-```
+| 顺序 | GPU 2 | GPU 4 | 进入下一步条件 |
+| --- | --- | --- | --- |
+| 0 | 不启动 | 不启动 | 用户批准本计划 |
+| 1 | LongCat prompts 0-4 | Causal 21/42/84 length pilot | BF16 和 TRQ 输出非空、有限 |
+| 2 | 继续 LongCat 0-4 | Causal MovieGen10 x 5 modes | 选定并冻结正式帧数 |
+| 3 | 等待或做 CPU 评测 | HY dev 5 scenes x 4 actions x 5 modes | dev 人工 action review 完成 |
+| 4 | 空闲 | LongCat prompts 5-9 | 前后 shard 无索引冲突 |
+| 5 | 配对评测 | 配对评测；可选 HY holdout | 用户批准 holdout |
+
+自动编排由 `run_two_gpu_matrix.sh` 实现，正式启动前必须再次做 dry-run 和 shell 检查：
+
+1. secondary 默认使用 GPU 4，LongCat 默认使用 GPU 2；
+2. LongCat 通过 `START_INDEX`/`LIMIT` 拆成互斥 shard，禁止两个 GPU 写同一索引；
+3. `prepare_hy_official_scenes.py` 下载官方 test cases，并生成固定的 dev/holdout
+   manifest；
+4. 每次输出带独立 `RUN_ID`，不会覆盖 smoke；LongCat prompt 0 和 Causal pilot 的
+   可兼容 smoke 结果通过符号链接复用；
+5. Causal pilot 自动选择通过数量、非空和可解码工程门的最长帧数。人工质量审阅仍在
+   生成完成后进行。
+
+Expansion A 的计划生成量为 210 个视频：Causal 50、LongCat 10 个 BF16 prefix 加
+50 个 continuation、HY dev 100。Causal length pilot 另计 45 个视频。HY holdout
+如获批准再追加 100 个视频。
+
+停止条件：BF16 失败、NaN/黑帧、输出缺失、量化静默回退或新增 TRQ-only catastrophe
+时停止对应队列并保留日志。packed-naive 的预期低精度崩坏应记录，但不应阻止同一
+输入上的 BF16/TRQ 对照完成。HY dev 若出现重复的 TRQ-only 动作反转，则不进入
+holdout。
 
 生成完成后执行：
 

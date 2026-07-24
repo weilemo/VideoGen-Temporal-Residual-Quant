@@ -11,44 +11,51 @@ require_stage "${stage}"
 
 gpu="${GPU:-0}"
 if [[ "${stage}" == smoke ]]; then
-  limit=1
+  default_limit=1
 else
-  limit=10
+  default_limit=10
 fi
+limit="${LIMIT:-${default_limit}}"
+start_index="${START_INDEX:-0}"
+run_id="${RUN_ID:-${stage}}"
+[[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || {
+  echo "invalid RUN_ID: ${run_id}" >&2
+  exit 2
+}
 export CUDA_VISIBLE_DEVICES="${gpu}"
 
-log_root="${REPO_ROOT}/results/world_model_quant/logs/${stage}"
+log_root="${REPO_ROOT}/results/world_model_quant/logs/${run_id}"
 mkdir -p "${log_root}"
 
 case "${baseline}" in
   causal_forcing)
-    prompts="$(prepare_prompt_subset "${limit}" "causal_${stage}")"
-    output_root="${REPO_ROOT}/results/world_model_quant/causal_forcing/${stage}"
+    prompts="$(prepare_prompt_slice "${limit}" "${start_index}" "causal_${run_id}_${start_index}_${limit}")"
+    output_root="${REPO_ROOT}/results/world_model_quant/causal_forcing/${run_id}"
     for variant in "${VARIANTS[@]}"; do
       PROMPTS="${prompts}" \
       OUTPUT_ROOT="${output_root}" \
       NUM_OUTPUT_FRAMES="${CAUSAL_FRAMES:-21}" \
         bash "${REPO_ROOT}/integrations/causal_forcing/run_moviegen10.sh" "${variant}" \
-        2>&1 | tee "${log_root}/causal_forcing_${variant}.log"
+        2>&1 | tee "${log_root}/causal_forcing_${variant}_${start_index}_${limit}.log"
     done
     ;;
   longcat)
-    output_root="${REPO_ROOT}/results/world_model_quant/longcat/${stage}"
-    LIMIT="${limit}" OUTPUT_ROOT="${output_root}" \
+    output_root="${REPO_ROOT}/results/world_model_quant/longcat/${run_id}"
+    LIMIT="${limit}" START_INDEX="${start_index}" OUTPUT_ROOT="${output_root}" \
       bash "${REPO_ROOT}/integrations/longcat_video/run_moviegen10.sh" bf16 prefix \
-      2>&1 | tee "${log_root}/longcat_prefix_bf16.log"
+      2>&1 | tee "${log_root}/longcat_prefix_bf16_${start_index}_${limit}.log"
     for variant in "${VARIANTS[@]}"; do
-      LIMIT="${limit}" OUTPUT_ROOT="${output_root}" \
+      LIMIT="${limit}" START_INDEX="${start_index}" OUTPUT_ROOT="${output_root}" \
         bash "${REPO_ROOT}/integrations/longcat_video/run_moviegen10.sh" \
           "${variant}" continuation \
-        2>&1 | tee "${log_root}/longcat_${variant}.log"
+        2>&1 | tee "${log_root}/longcat_${variant}_${start_index}_${limit}.log"
     done
     ;;
   hy_worldplay)
     scenes="${HY_SCENES:-${script_dir}/hy_scenes.example.json}"
     args=(
       --scenes "${scenes}"
-      --experiment-id "action_control_${stage}"
+      --experiment-id "action_control_${run_id}"
       --limit-scenes "${HY_LIMIT_SCENES:-${limit}}"
     )
     if [[ "${stage}" == smoke ]]; then

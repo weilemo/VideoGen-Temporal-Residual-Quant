@@ -22,11 +22,12 @@ cd /Users/moweile/Obsidian/Knowledge/Research/project/longvideo-kvcache-quant/co
 ## 当前接力点
 
 - 三基线实验统一入口：`experiments/world_model_quant/README.md`。
-  - 先分别执行 `run_generation.sh <baseline> smoke`；
-  - Causal Forcing 再执行 `run_causal_length_pilot.sh`；
-  - HY full run 需要远端提供至少 5 个 conditioning scenes 的 manifest；
-  - 两卡正式矩阵由 `run_two_gpu_matrix.sh` 编排，LongCat 独占一张卡，Causal
-    和 HY 在另一张卡上顺序执行；
+  - 2026-07-24 已完成三条基线、五档精度的 15 个 smoke 视频；
+  - 扩展计划已获批准，自动编排代码正在同步和启动；
+  - GPU 0 已关闭，待批准方案使用 GPU 2/4；
+  - Causal 先做 21/42/84 帧 length pilot，再跑 MovieGen10；
+  - HY 使用官方 test cases 1-5 作为 dev、6-10 作为 holdout，不重复 demo 图；
+  - LongCat 计划拆为 prompts 0-4 与 5-9 两个互斥 shard；
   - 本地推送后，远端只运行一次 `pull_remote_once.sh`，不启动同步轮询。
 
 - 2026-07-20 在线分叉计划已实现于 `codex/trq-online-causal-gates`：
