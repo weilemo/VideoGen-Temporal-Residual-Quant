@@ -1,5 +1,14 @@
 # 关键决策
 
+## D-2026-07-24-14 GitHub 作为远端代码同步边界
+
+- 决策：完成的本地 source、脚本、测试和文档先提交并推送 GitHub；code-server
+  只通过人工触发的一次性 `git pull --ff-only` 获取代码，不运行 Git 轮询任务。
+- 原因：让本地、GitHub 和远端运行副本共享可审计的 commit，避免直接拷贝造成的
+  内容漂移，同时不干扰远端独有的权重、环境、上游仓库、结果和日志。
+- 影响：`experiments/world_model_quant/pull_remote_once.sh` 是远端更新入口；远端有
+  tracked 改动或分支不匹配时必须停止，由人工处理，禁止自动覆盖。
+
 ## D-2026-07-24-12 方法、集成、实验与上游参考分层
 
 - 决策：保留 `temporalresidualkvquant/` 作为方法工作区；基线适配统一放入

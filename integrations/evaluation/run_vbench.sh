@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-baseline="${1:?usage: run_vbench_moviegen10.sh rollingforcing|hy_worldplay|longcat}"
+baseline="${1:?usage: run_vbench.sh rollingforcing|hy_worldplay|longcat|causal_forcing}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
-prompt_file="${repo_root}/integrations/evaluation/moviegen10.txt"
+prompt_file="${PROMPT_FILE:-${repo_root}/integrations/evaluation/moviegen10.txt}"
 eval_script="${repo_root}/forcing/vbench/vbench2_beta_long/eval_long.py"
-output_root="${repo_root}/results/world_model_quant/vbench/${baseline}"
+output_root="${OUTPUT_ROOT:-${repo_root}/results/world_model_quant/vbench/${baseline}}"
+expected_videos="${EXPECTED_VIDEOS:-10}"
 
 case "${baseline}" in
   rollingforcing)
@@ -18,11 +19,15 @@ case "${baseline}" in
   longcat)
     video_root="${repo_root}/results/world_model_quant/longcat/moviegen10"
     ;;
+  causal_forcing)
+    video_root="${repo_root}/results/world_model_quant/causal_forcing/moviegen10"
+    ;;
   *)
     echo "unknown baseline: ${baseline}" >&2
     exit 2
     ;;
 esac
+video_root="${VIDEO_ROOT:-${video_root}}"
 
 source "${HOME}/miniconda3/etc/profile.d/conda.sh"
 conda activate vbench
@@ -46,9 +51,10 @@ for variant in "${variants[@]}"; do
     continue
   fi
   named_dir="${output_root}/inputs/${variant}"
-  python "${script_dir}/prepare_vbench_moviegen10.py" \
+  python "${script_dir}/prepare_vbench.py" \
     --src "${video_root}/${variant}" \
-    --dst "${named_dir}"
+    --dst "${named_dir}" \
+    --expected-videos "${expected_videos}"
   for dimension in "${dimensions[@]}"; do
     python "${eval_script}" \
       --videos_path "${named_dir}" \

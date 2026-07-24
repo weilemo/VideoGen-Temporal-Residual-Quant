@@ -29,3 +29,6 @@ python experiments/paired_quality/run_forcing_paired_metrics.py \
 
 VBench remains the quality metric; PSNR/SSIM/LPIPS measure drift from the
 same-seed BF16 continuation.
+
+Use `experiments/world_model_quant/` for the two-GPU queue and evaluation. Its
+paired-metric launcher skips the 13 shared conditioning frames.

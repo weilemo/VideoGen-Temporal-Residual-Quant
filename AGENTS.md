@@ -18,12 +18,13 @@ This local checkout is for code review and adapter development. Do not download
 model weights or run GPU experiments locally. After a coherent code change:
 
 1. run CPU/static checks locally;
-2. synchronize the same change to the remote code-server checkout;
-3. verify checksums for maintained code paths;
+2. commit and push the maintained change to GitHub when authorized;
+3. update the remote checkout with one explicit fast-forward-only pull;
 4. run remote smoke tests before reporting the backend as usable.
 
-Do not push to GitHub unless the user explicitly asks. Preserve remote-only
-weights, outputs, environments, and upstream clones during synchronization.
+Do not push to GitHub unless the user explicitly asks. Do not poll the remote
+checkout or copy maintained source directly around Git history. Preserve
+remote-only weights, outputs, environments, and upstream clones during pulls.
 
 ## Change Discipline
 

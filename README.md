@@ -11,7 +11,7 @@ and experiment outputs.
 videoquant-trq/
 ├── temporalresidualkvquant/  # TRQ algorithms, tests, Self-Forcing backend
 ├── integrations/             # Causal, HY, LongCat, Rolling contracts/patches
-├── experiments/              # baseline-neutral evaluation orchestration
+├── experiments/              # paired metrics and multi-baseline orchestration
 ├── references/               # read-only upstream snapshots
 ├── forcing/                  # legacy upstream/runtime snapshots
 └── docs/
@@ -26,7 +26,9 @@ The ownership rules and local/remote execution policy are in [AGENTS.md](AGENTS.
 1. Read [current status](docs/project/STATUS.md) and [handoff](docs/project/HANDOFF.md).
 2. Read [method documentation](temporalresidualkvquant/README.md).
 3. Choose a baseline from [integrations](integrations/README.md).
-4. Use [workspace structure](temporalresidualkvquant/docs/workspace_structure.md)
+4. Use the [three-baseline experiment plan](experiments/world_model_quant/README.md)
+   for Causal Forcing, LongCat, and HY-WorldPlay.
+5. Use [workspace structure](temporalresidualkvquant/docs/workspace_structure.md)
    when adding a backend or moving code.
 
 ## Local Validation

@@ -7,6 +7,15 @@
 
 ## 正在做什么
 
+- **三基线 TRQ 实验计划和编排已写入本地（2026-07-24，待远端 GPU 验证）**：
+  - Causal Forcing 与 LongCat 使用 MovieGen10；HY-WorldPlay 使用多场景动作条件协议；
+  - 五档精度统一为 BF16、TRQ INT4/INT2、packed-naive INT4/INT2；
+  - `experiments/world_model_quant/` 提供 smoke、Causal 长度 pilot、两张 A100
+    队列、配对指标、VBench 和 HY action proxy 入口；
+  - LongCat 配对指标跳过 13 个共享 conditioning frames；
+  - 当前状态仅为本地静态/CPU 可验证，不能据此宣称三条 GPU backend 已验证。
+  - 远端代码同步改为 GitHub commit 后的一次性 fast-forward pull，不做远端轮询。
+
 - **仓库所有权边界已整理（2026-07-24）**：
   - `temporalresidualkvquant/` 继续作为 TRQ 方法主库；
   - Causal Forcing、HY-WorldPlay、LongCat-Video 和 Rolling Forcing 的启动器、

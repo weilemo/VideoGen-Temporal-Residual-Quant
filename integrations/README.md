@@ -13,6 +13,8 @@ tests. Core quantization logic remains in `temporalresidualkvquant/src/trq/`.
 
 Shared MovieGen10 prompts and VBench launchers live in `evaluation/`. Paired
 PSNR, SSIM, and LPIPS evaluation lives in `experiments/paired_quality/`.
+The reproducible Causal/LongCat/HY matrix, GPU allocation, gates, and one-shot
+remote pull workflow live in `experiments/world_model_quant/`.
 
 Do not put checkpoints or generated videos here. Those belong on the remote
 runner under its model and result roots.

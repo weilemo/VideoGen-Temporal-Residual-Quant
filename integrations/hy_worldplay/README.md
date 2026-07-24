@@ -75,3 +75,7 @@ the same seed. Evaluate:
 A quantized rollout is not action-controllable merely because it moves. It
 must preserve the direction and timing of the BF16 response while remaining
 visually stable.
+
+The multi-scene matrix and optical-flow proxy evaluator are maintained in
+`experiments/world_model_quant/`. Conditioning images remain remote; only the
+scene manifest belongs in Git.

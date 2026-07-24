@@ -18,10 +18,12 @@ except Exception as exc:
     LPIPS_IMPORT_ERROR = exc
 
 
-def read_video(path: Path, max_frames=None):
+def read_video(path: Path, max_frames=None, start_frame=0):
     frames = []
     for i, frame in enumerate(iio.imiter(path)):
-        if max_frames is not None and i >= max_frames:
+        if i < start_frame:
+            continue
+        if max_frames is not None and len(frames) >= max_frames:
             break
         frames.append(frame[..., :3])
     if not frames:
@@ -41,6 +43,7 @@ def evaluate_directories(
     cmp_dir,
     *,
     max_frames=None,
+    start_frame=0,
     device="cuda",
     match_by_index=False,
     strict_shape=False,
@@ -98,8 +101,8 @@ def evaluate_directories(
         pairs = [((idx, 0), ref_map[name], cmp_map[name]) for idx, name in enumerate(sorted(ref_map))]
 
     for (idx, sample_idx), ref, cmp in pairs:
-        a = read_video(ref, max_frames=max_frames)
-        b = read_video(cmp, max_frames=max_frames)
+        a = read_video(ref, max_frames=max_frames, start_frame=start_frame)
+        b = read_video(cmp, max_frames=max_frames, start_frame=start_frame)
         if strict_shape and a.shape != b.shape:
             raise ValueError(
                 f"paired video shapes differ for index {(idx, sample_idx)}: "
@@ -135,6 +138,7 @@ def evaluate_directories(
         "cmp_dir": str(cmp_dir),
         "num_videos": len(rows),
         "max_frames": max_frames,
+        "start_frame": start_frame,
         "lpips_available": lpips_model is not None,
         "psnr_aggregation": "RGB global MSE per video, then mean PSNR across videos",
         "mean_psnr": float(np.mean([row["psnr"] for row in rows])),
@@ -152,6 +156,12 @@ def main():
     ap.add_argument("--cmp-dir", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-frames", type=int, default=0)
+    ap.add_argument(
+        "--start-frame",
+        type=int,
+        default=0,
+        help="Skip this many leading frames before computing paired metrics",
+    )
     ap.add_argument("--device", default="cuda")
     ap.add_argument(
         "--match-by-index",
@@ -176,6 +186,7 @@ def main():
         args.ref_dir,
         args.cmp_dir,
         max_frames=args.max_frames or None,
+        start_frame=args.start_frame,
         device=args.device,
         match_by_index=args.match_by_index,
         strict_shape=args.strict_shape,

@@ -55,7 +55,13 @@ def main() -> None:
     parser.add_argument(
         "--baseline",
         required=True,
-        choices=("selfforcing", "rollingforcing", "longcat"),
+        choices=(
+            "selfforcing",
+            "rollingforcing",
+            "causal_forcing",
+            "longcat",
+            "hy_worldplay",
+        ),
     )
     parser.add_argument("--root", required=True, help="Directory containing BF16 and quantized variant folders")
     parser.add_argument("--reference", default="bf16", help="BF16 reference directory relative to --root")
@@ -68,6 +74,12 @@ def main() -> None:
     parser.add_argument("--output-dir", default="", help="Default: ROOT/paired_metrics")
     parser.add_argument("--expected-videos", type=int, default=0)
     parser.add_argument("--max-frames", type=int, default=0)
+    parser.add_argument(
+        "--start-frame",
+        type=int,
+        default=0,
+        help="Skip shared prefix/conditioning frames before comparison",
+    )
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -84,6 +96,7 @@ def main() -> None:
             root / args.reference,
             root / relative_dir,
             max_frames=args.max_frames or None,
+            start_frame=args.start_frame,
             device=args.device,
             match_by_index=True,
             strict_shape=True,
@@ -109,6 +122,7 @@ def main() -> None:
         "root": str(root),
         "reference": args.reference,
         "metric_scope": "quantization trajectory fidelity against same-seed BF16",
+        "start_frame": args.start_frame,
         "higher_is_better": ["psnr", "ssim"],
         "lower_is_better": ["lpips"],
         "variants": rows,

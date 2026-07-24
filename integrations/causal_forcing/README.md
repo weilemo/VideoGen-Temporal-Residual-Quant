@@ -22,3 +22,6 @@ done
 The adapter keeps Causal Forcing's BSHD cache slicing contract. BF16 uses the
 native tensor cache; quantized modes store frame-aligned packed spans and
 decode only the range requested by causal attention.
+
+Use `experiments/world_model_quant/` for the controlled smoke, length pilot,
+MovieGen10 matrix, paired metrics, and VBench sequence.

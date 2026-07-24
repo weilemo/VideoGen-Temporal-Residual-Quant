@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "scenes": [
+    {
+      "id": "hyworld_demo",
+      "image_path": "assets/hyworld.png",
+      "prompt": "First-person view exploring a detailed open environment with stable geometry and natural motion"
+    }
+  ]
+}

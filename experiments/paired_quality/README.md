@@ -17,7 +17,9 @@ ROOT/
 ```
 
 Video names must begin with `PROMPT_INDEX-SAMPLE_INDEX` or
-`PROMPT_INDEX_SAMPLE_INDEX`. Run both baselines with:
+`PROMPT_INDEX_SAMPLE_INDEX`. Use `--start-frame 13` for LongCat continuation so
+the shared conditioning prefix is not counted as quantization fidelity. Run the
+legacy two-forcing wrapper with:
 
 ```bash
 pip install -e 'temporalresidualkvquant[analysis]'
@@ -30,3 +32,6 @@ bash experiments/paired_quality/run_both_forcing_metrics.sh \
 Each baseline receives per-variant JSON plus `summary.json` and `summary.csv`.
 The command fails on missing/extra pairs, shape mismatches, missing LPIPS, an
 unexpected video count, or invalid aggregate values.
+
+The Causal Forcing, LongCat, and HY-WorldPlay orchestration is documented in
+`experiments/world_model_quant/README.md`.

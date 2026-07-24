@@ -15,18 +15,22 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--src", type=Path, required=True)
     parser.add_argument("--dst", type=Path, required=True)
+    parser.add_argument("--expected-videos", type=int, default=10)
     args = parser.parse_args()
 
     files = sorted(args.src.rglob("*.mp4"), key=sort_key)
-    if len(files) != 10:
-        raise SystemExit(f"expected exactly 10 videos in {args.src}, found {len(files)}")
+    if len(files) != args.expected_videos:
+        raise SystemExit(
+            f"expected exactly {args.expected_videos} videos in {args.src}, "
+            f"found {len(files)}"
+        )
 
     args.dst.mkdir(parents=True, exist_ok=True)
     for old in args.dst.glob("*.mp4"):
         old.unlink()
     for index, video in enumerate(files):
         (args.dst / f"{index}-0_ema.mp4").symlink_to(video.resolve())
-    print(f"linked 10 videos: {args.src} -> {args.dst}")
+    print(f"linked {len(files)} videos: {args.src} -> {args.dst}")
 
 
 if __name__ == "__main__":

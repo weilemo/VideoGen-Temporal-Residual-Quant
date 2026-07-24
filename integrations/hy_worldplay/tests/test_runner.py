@@ -70,4 +70,4 @@ def test_unknown_action_is_rejected(config, actions):
 
 def test_source_override(monkeypatch, config):
     monkeypatch.setenv("HY_WORLDPLAY_SOURCE", "/tmp/hy-worldplay")
-    assert runner.source_root(config) == Path("/tmp/hy-worldplay")
+    assert runner.source_root(config) == Path("/tmp/hy-worldplay").resolve()

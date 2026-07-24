@@ -50,11 +50,13 @@ class EvalRefMetricsTest(unittest.TestCase):
                 summary = eval_ref_metrics.evaluate_directories(
                     ref_dir,
                     cmp_dir,
+                    start_frame=1,
                     match_by_index=True,
                     strict_shape=True,
                 )
 
         self.assertTrue(math.isfinite(summary["mean_psnr"]))
+        self.assertEqual(summary["start_frame"], 1)
         self.assertEqual(
             summary["psnr_aggregation"],
             "RGB global MSE per video, then mean PSNR across videos",
