@@ -24,6 +24,8 @@ native tensor cache; quantized modes store frame-aligned packed spans and
 decode only the range requested by causal attention. The launcher sets the
 logical cache capacity from `NUM_OUTPUT_FRAMES` for every precision mode; use
 `KV_CACHE_CAPACITY_FRAMES` only for a controlled capacity ablation.
+Each completed sample also reports `peak_cuda_bytes` with cache bytes and the
+compression ratio.
 
 Use `experiments/world_model_quant/` for the controlled smoke, length pilot,
 MovieGen10 matrix, paired metrics, and VBench sequence.
