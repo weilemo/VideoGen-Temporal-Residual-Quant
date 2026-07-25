@@ -9,6 +9,32 @@ readonly WORLD_MODEL_EXPERIMENT_DIR REPO_ROOT
 VARIANTS=(bf16 trq_int4 trq_int2 naive_int4 naive_int2)
 readonly VARIANTS
 
+configure_videoquant_runtime() {
+  local requested_prefix="${VIDEOQUANT_ENV_PREFIX:-}"
+  local prefix="${requested_prefix:-${HOME}/miniconda3/envs/videoquant}"
+
+  if [[ ! -d "${prefix}" ]]; then
+    if [[ -n "${requested_prefix}" ]]; then
+      echo "VIDEOQUANT_ENV_PREFIX does not exist: ${prefix}" >&2
+      return 2
+    fi
+    return 0
+  fi
+
+  [[ -x "${prefix}/bin/python" ]] || {
+    echo "videoquant python is not executable: ${prefix}/bin/python" >&2
+    return 2
+  }
+  [[ -x "${prefix}/bin/torchrun" ]] || {
+    echo "videoquant torchrun is not executable: ${prefix}/bin/torchrun" >&2
+    return 2
+  }
+
+  export PATH="${prefix}/bin:${PATH}"
+  export CONDA_PREFIX="${prefix}"
+  export PYTHON_BIN="${prefix}/bin/python"
+}
+
 require_baseline() {
   case "$1" in
     causal_forcing|longcat|hy_worldplay) ;;

@@ -24,15 +24,18 @@
     独立阶段状态与进程组清理；先通过 42/84 帧单 prompt gate 再恢复正式队列；
   - 修复后 42/84 帧五档单 prompt gate 均通过；84 帧四个量化模式峰值 CUDA 为
     23.44-26.46 GB，恢复编排已接管既有 LongCat 并补齐剩余 Causal pilot；
-  - 2026-07-25 13:05，Causal 正式矩阵五档各 10/10；LongCat 除 naive INT2 为
-    7/10 且仍在运行外，其余正式输出均为 10/10；
+  - 2026-07-25，Causal 与 LongCat 正式矩阵已完成；HY 的 `turn_left` BF16 单视频
+    gate 已生成可解码视频；
   - HY dev 在生成前因长字面 prompt 被 `Path.exists()` 当成文件路径而失败，当前
     0/100；恢复方案保持文本 prompt 原样传入，完成 CPU 回归后只续跑 HY，不重复
     Causal 或 LongCat。HY 的工程门仍是 100 个可解码视频，科学门仍需动作指标与盲审；
   - prompt 修复后的首次 recovery 又发现正式动作仅覆盖 24/48 latent steps；上游将
     `curr_viewmats` 空切片错误写入 `err.txt` 却返回 0。已在 0 个 MP4、24 个错误日志
-    时停止并释放 GPU 2；下一版补 48-step 动作、启动前 horizon gate 和生成后视频门，
-    先通过单场景 `turn_left` BF16 后才能恢复全矩阵；
+    时停止并释放 GPU 2；现已补 48-step 动作、启动前 horizon gate 和生成后视频门；
+  - 首次全矩阵接续因 `RUN_ID` 未导出误写到隔离的 `action_control_full/`，第二次因新
+    终端落回 `(base)` 而缺少 `remote_pdb`。公共入口现统一绑定 `videoquant` 的
+    `python/torchrun`；2026-07-25 14:56 正确 `RUN_ID` 的 recovery 已在 GPU 2 进入
+    权重加载后的推理阶段，只补 HY 缺失输出；
   - 远端代码同步改为 GitHub commit 后的一次性 fast-forward pull，不做远端轮询。
 
 - **仓库所有权边界已整理（2026-07-24）**：

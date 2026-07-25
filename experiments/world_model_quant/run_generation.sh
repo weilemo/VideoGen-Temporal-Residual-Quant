@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${script_dir}/common.sh"
+configure_videoquant_runtime
 
 baseline="${1:?usage: run_generation.sh BASELINE smoke|full}"
 stage="${2:?usage: run_generation.sh BASELINE smoke|full}"

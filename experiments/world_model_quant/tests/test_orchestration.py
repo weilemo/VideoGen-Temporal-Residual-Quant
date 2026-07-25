@@ -83,6 +83,47 @@ def test_two_gpu_dry_run_uses_gpu_2_and_4_without_execution(tmp_path):
     assert "No GPU commands executed" in result.stdout
 
 
+def test_runtime_prefix_binds_python_and_torchrun(tmp_path):
+    prefix = tmp_path / "videoquant"
+    bin_dir = prefix / "bin"
+    bin_dir.mkdir(parents=True)
+    for name in ("python", "torchrun"):
+        executable = bin_dir / name
+        executable.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        executable.chmod(0o755)
+
+    command = f"""
+      source {ROOT / 'common.sh'}
+      VIDEOQUANT_ENV_PREFIX={prefix}
+      configure_videoquant_runtime
+      printf '%s|%s|%s\n' "$CONDA_PREFIX" "$PYTHON_BIN" "$(command -v torchrun)"
+    """
+    result = subprocess.run(
+        ["bash", "-c", command], check=True, capture_output=True, text=True
+    )
+
+    conda_prefix, python_bin, torchrun_bin = result.stdout.strip().split("|")
+    assert conda_prefix == str(prefix)
+    assert python_bin == str(bin_dir / "python")
+    assert torchrun_bin == str(bin_dir / "torchrun")
+
+
+def test_explicit_missing_runtime_prefix_fails(tmp_path):
+    missing = tmp_path / "missing-videoquant"
+    command = f"""
+      source {ROOT / 'common.sh'}
+      VIDEOQUANT_ENV_PREFIX={missing}
+      configure_videoquant_runtime
+    """
+
+    result = subprocess.run(
+        ["bash", "-c", command], capture_output=True, text=True
+    )
+
+    assert result.returncode == 2
+    assert "VIDEOQUANT_ENV_PREFIX does not exist" in result.stderr
+
+
 def test_prompt_slice_selects_disjoint_longcat_shards(tmp_path):
     command = f"""
       source {ROOT / 'common.sh'}

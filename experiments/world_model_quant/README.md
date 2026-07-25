@@ -202,6 +202,24 @@ pose latents，共需要 48 steps。上游在后半程得到空的 `curr_viewmat
 动作从 24 steps 修正为 48 steps 是使动作条件覆盖既定生成 horizon 的协议纠错。旧
 24-step 运行没有视频，不进入对照数据，也不能与修复后的结果混合。
 
+单场景 `turn_left` BF16 gate 随后已生成可解码视频。第一次全矩阵接续因监督命令没有
+导出 `RUN_ID`，误写入独立的 `action_control_full/`；该任务已停止，目录保留作故障证据，
+不与 `action_control_expansion_a_20260724/` 混合。第二次接续暴露新终端处于 `(base)`，
+导致 `torchrun` 使用系统入口并缺少 `remote_pdb`。恢复协议因此再增加运行时门：
+
+1. `common.sh` 的 `configure_videoquant_runtime` 默认探测
+   `$HOME/miniconda3/envs/videoquant`，也接受显式 `VIDEOQUANT_ENV_PREFIX`；
+2. 生成、Causal pilot、两卡编排和评测入口统一将该环境的 `bin/` 放到 `PATH` 首位，
+   并固定 `CONDA_PREFIX` 与 `PYTHON_BIN`；显式路径不存在或缺少可执行的
+   `python/torchrun` 时在 GPU 启动前失败；
+3. 正确 recovery 使用 `RUN_ID=expansion_a_20260724`，保留已通过的 BF16 gate，只补
+   其余视频。监督进程独立记录 PID、PGID、状态和日志；完成条件仍是正确目录 100 个
+   MP4 全部通过 `ffprobe`。
+
+2026-07-25 14:56，正确 recovery 已在 GPU 2 启动，状态为 `running`，启动检查时显存
+约 7.6 GiB，日志已完成 CUDA 分布式初始化与权重加载。此状态只证明工程续跑已恢复，
+不代表 100-video 矩阵或动作可控性评测完成。
+
 Expansion A 的计划生成量为 210 个视频：Causal 50、LongCat 10 个 BF16 prefix 加
 50 个 continuation、HY dev 100。Causal length pilot 另计 45 个视频。HY holdout
 如获批准再追加 100 个视频。

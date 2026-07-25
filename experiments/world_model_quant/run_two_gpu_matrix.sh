@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${script_dir}/common.sh"
+configure_videoquant_runtime
 
 longcat_gpu="${LONGCAT_GPU:-2}"
 secondary_gpu="${SECONDARY_GPU:-4}"

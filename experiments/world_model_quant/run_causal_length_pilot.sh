@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${script_dir}/common.sh"
+configure_videoquant_runtime
 
 export CUDA_VISIBLE_DEVICES="${GPU:-0}"
 pilot_prompts="${PILOT_PROMPTS:-3}"
