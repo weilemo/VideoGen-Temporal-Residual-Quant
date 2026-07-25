@@ -31,6 +31,8 @@ VARIANTS = {
     "naive_int2": Variant("packed-naive-int2"),
 }
 
+LATENTS_PER_CHUNK = 4
+
 
 def load_json(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as handle:
@@ -65,6 +67,32 @@ def resolve_prompt_argument(value: str) -> str:
         return value
 
 
+def pose_latent_steps(pose: str) -> int:
+    total = 0
+    for command in pose.split(","):
+        action, separator, duration = command.strip().rpartition("-")
+        if not separator or not action:
+            raise ValueError(f"invalid HY pose command: {command!r}")
+        try:
+            steps = int(float(duration))
+        except ValueError as error:
+            raise ValueError(f"invalid HY pose duration: {command!r}") from error
+        if steps <= 0:
+            raise ValueError(f"HY pose duration must be positive: {command!r}")
+        total += steps
+    return total
+
+
+def validate_action_horizon(config: dict[str, Any], pose: str) -> None:
+    required = int(config["num_chunks"]) * LATENTS_PER_CHUNK
+    available = pose_latent_steps(pose)
+    if available < required:
+        raise ValueError(
+            f"HY pose has {available} latent steps but generation requires {required} "
+            f"({config['num_chunks']} chunks x {LATENTS_PER_CHUNK})"
+        )
+
+
 def validate_config(config: dict[str, Any]) -> None:
     memory = int(config["memory_frames"])
     context = int(config["temporal_context_size"])
@@ -96,6 +124,7 @@ def build_command(
     action_map = actions.get("actions", {})
     if action_name not in action_map:
         raise ValueError(f"unknown action: {action_name}")
+    validate_action_horizon(config, str(action_map[action_name]))
 
     upstream = source_root(config)
     variant = VARIANTS[variant_name]
@@ -222,6 +251,11 @@ def run_one(
         str(source_root(config) / "experiments/HY-WorldPlay"),
     ])
     subprocess.run(command, cwd=source_root(config), env=env, check=True)
+    completed = [path for path in output.glob("*.mp4") if is_decodable_video(path)]
+    if not completed:
+        error_log = output / "err.txt"
+        suffix = f"; inspect {error_log}" if error_log.exists() else ""
+        raise RuntimeError(f"HY run produced no decodable MP4 in {output}{suffix}")
 
 
 def is_decodable_video(path: Path) -> bool:

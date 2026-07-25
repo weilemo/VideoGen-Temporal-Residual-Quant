@@ -29,6 +29,10 @@
   - HY dev 在生成前因长字面 prompt 被 `Path.exists()` 当成文件路径而失败，当前
     0/100；恢复方案保持文本 prompt 原样传入，完成 CPU 回归后只续跑 HY，不重复
     Causal 或 LongCat。HY 的工程门仍是 100 个可解码视频，科学门仍需动作指标与盲审；
+  - prompt 修复后的首次 recovery 又发现正式动作仅覆盖 24/48 latent steps；上游将
+    `curr_viewmats` 空切片错误写入 `err.txt` 却返回 0。已在 0 个 MP4、24 个错误日志
+    时停止并释放 GPU 2；下一版补 48-step 动作、启动前 horizon gate 和生成后视频门，
+    先通过单场景 `turn_left` BF16 后才能恢复全矩阵；
   - 远端代码同步改为 GitHub commit 后的一次性 fast-forward pull，不做远端轮询。
 
 - **仓库所有权边界已整理（2026-07-24）**：

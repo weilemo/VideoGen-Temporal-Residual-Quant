@@ -47,8 +47,8 @@ def test_counterfactual_actions_change_pose_only(config, actions):
     assert left["pose"] != right["pose"]
     left_pose_index = left_command.index("--pose") + 1
     right_pose_index = right_command.index("--pose") + 1
-    assert left_command[left_pose_index] == "w-8,a-8,w-8"
-    assert right_command[right_pose_index] == "w-8,d-8,w-8"
+    assert left_command[left_pose_index] == "w-16,a-16,w-16"
+    assert right_command[right_pose_index] == "w-16,d-16,w-16"
 
 
 def test_temporal_partition_must_match_prediction(config, actions):
@@ -91,3 +91,27 @@ def test_existing_prompt_file_is_resolved_to_absolute_path(tmp_path, config, act
     command, _ = runner.build_command(config, actions, "bf16", "turn_left")
 
     assert command[command.index("--input") + 1] == str(prompt_file.resolve())
+
+
+def test_all_actions_cover_the_configured_generation_horizon(config, actions):
+    for pose in actions["actions"].values():
+        runner.validate_action_horizon(config, pose)
+
+
+def test_short_action_is_rejected_before_gpu_execution(config, actions):
+    actions["actions"]["turn_left"] = "w-8,a-8,w-8"
+
+    with pytest.raises(ValueError, match="24 latent steps.*requires 48"):
+        runner.build_command(config, actions, "bf16", "turn_left")
+
+
+def test_run_rejects_zero_exit_without_a_video(
+    tmp_path, monkeypatch, config, actions
+):
+    config["output_root"] = str(tmp_path)
+    config["experiment_id"] = "missing-output"
+    monkeypatch.setattr(runner, "validate_runtime", lambda _: None)
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs: None)
+
+    with pytest.raises(RuntimeError, match="produced no decodable MP4"):
+        runner.run_one(config, actions, "bf16", "turn_left", dry_run=False)

@@ -32,6 +32,9 @@ cd /Users/moweile/Obsidian/Knowledge/Research/project/longvideo-kvcache-quant/co
   - 2026-07-25 Causal 正式矩阵已五档各 10/10；LongCat 仅剩 naive INT2 后 3 条；
   - HY dev 尚未生成视频：长字面 prompt 被误作路径并触发 filename-too-long；修复后
     只续跑同一 `RUN_ID` 的 HY 100-video 矩阵，不重跑其他基线；
+  - 首次 prompt recovery 已停止：四动作只有 24 latent steps，短于 12 chunks 所需
+    48 steps，上游吞异常后留下 24 个 `err.txt`、0 个 MP4；必须先过 48-step horizon
+    校验、输出可解码校验和单场景 BF16 gate；
   - GPU 0 已关闭，待批准方案使用 GPU 2/4；
   - Causal 先做 21/42/84 帧 length pilot，再跑 MovieGen10；
   - HY 使用官方 test cases 1-5 作为 dev、6-10 作为 holdout，不重复 demo 图；

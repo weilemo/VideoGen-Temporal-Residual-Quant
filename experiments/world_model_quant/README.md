@@ -175,11 +175,32 @@ BF16 prefix、BF16/TRQ INT4/TRQ INT2/naive INT4 各 10 条，naive INT2 在
    `RUN_ID=expansion_a_20260724`。Causal 与 LongCat 的可解码输出不得重跑；
 5. recovery 必须独立记录 `running/done/failed` 和日志。只有 5 scenes x 4 actions x
    5 modes 共 100 个视频全部存在且可由 `ffprobe` 解码，才能把 HY 工程状态改为
-   `done`；动作可控性仍需代理指标和人工审阅，不能由数量门代替。
+`done`；动作可控性仍需代理指标和人工审阅，不能由数量门代替。
 
-本次恢复只修复输入分派，不改变 prompt、conditioning image、动作序列、seed、生成
-长度或量化参数，因此 BF16/TRQ/naive 的受控比较仍然成立。HY recovery 完成前，
+第一阶段 prompt 修复只改变输入分派；后续 action-horizon 纠错只把四个动作补齐到
+既定生成长度。prompt、conditioning image、动作类别、seed、生成长度和量化参数仍在
+五档精度间固定，因此 BF16/TRQ/naive 的受控比较成立。HY recovery 完成前，
 Expansion A 只能标记为 partial，不能进入 holdout。
+
+首次按上述方案恢复后又暴露出独立的 action-horizon 错误：四个正式动作原为
+`3 x 8 = 24` latent steps，而 `num_chunks=12` 的 WAN pipeline 每个 chunk 消耗 4 个
+pose latents，共需要 48 steps。上游在后半程得到空的 `curr_viewmats`，写入
+`err.txt` 后仍以退出码 0 返回，导致旧 runner 继续下一个组合。2026-07-25 14:22
+检查时已有 24 个 `err.txt`、0 个 MP4；该无效 recovery 已按“输出缺失即停止”门终止，
+孤立 torchrun 也已清理，GPU 2 显存归零。
+
+因此恢复计划追加以下硬门：
+
+1. 四个反事实动作统一覆盖 48 steps：转向使用 `w-16,a/d-16,w-16`，纵向使用
+   `w/s-16,w/s-16,w/s-16`；动作语义、总长度和各阶段时长在五档精度间固定；
+2. runner 在启动 GPU 前计算 pose latent steps，不足 `num_chunks x 4` 直接失败；
+3. 上游返回后必须重新扫描输出目录，至少存在一个可解码 MP4，否则即使退出码为 0
+   也按失败处理并指向 `err.txt`；
+4. 正式恢复前先跑 official scene 1、`turn_left`、BF16 单视频 gate。只有该视频可解码
+   且没有 `err.txt`，才继续同一 `RUN_ID` 的剩余矩阵。
+
+动作从 24 steps 修正为 48 steps 是使动作条件覆盖既定生成 horizon 的协议纠错。旧
+24-step 运行没有视频，不进入对照数据，也不能与修复后的结果混合。
 
 Expansion A 的计划生成量为 210 个视频：Causal 50、LongCat 10 个 BF16 prefix 加
 50 个 continuation、HY dev 100。Causal length pilot 另计 45 个视频。HY holdout
