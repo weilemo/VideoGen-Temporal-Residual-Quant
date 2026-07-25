@@ -24,6 +24,11 @@
     独立阶段状态与进程组清理；先通过 42/84 帧单 prompt gate 再恢复正式队列；
   - 修复后 42/84 帧五档单 prompt gate 均通过；84 帧四个量化模式峰值 CUDA 为
     23.44-26.46 GB，恢复编排已接管既有 LongCat 并补齐剩余 Causal pilot；
+  - 2026-07-25 13:05，Causal 正式矩阵五档各 10/10；LongCat 除 naive INT2 为
+    7/10 且仍在运行外，其余正式输出均为 10/10；
+  - HY dev 在生成前因长字面 prompt 被 `Path.exists()` 当成文件路径而失败，当前
+    0/100；恢复方案保持文本 prompt 原样传入，完成 CPU 回归后只续跑 HY，不重复
+    Causal 或 LongCat。HY 的工程门仍是 100 个可解码视频，科学门仍需动作指标与盲审；
   - 远端代码同步改为 GitHub commit 后的一次性 fast-forward pull，不做远端轮询。
 
 - **仓库所有权边界已整理（2026-07-24）**：

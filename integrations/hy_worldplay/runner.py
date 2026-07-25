@@ -55,6 +55,16 @@ def resolve_from(root: Path, value: str) -> Path:
     return path.resolve() if path.is_absolute() else (root / path).resolve()
 
 
+def resolve_prompt_argument(value: str) -> str:
+    """Resolve prompt files while leaving literal prompt text untouched."""
+    candidate = resolve_from(REPO_ROOT, value)
+    try:
+        return str(candidate) if candidate.exists() else value
+    except OSError:
+        # Literal prompts can exceed the filesystem's filename-length limit.
+        return value
+
+
 def validate_config(config: dict[str, Any]) -> None:
     memory = int(config["memory_frames"])
     context = int(config["temporal_context_size"])
@@ -82,9 +92,7 @@ def build_command(
     validate_config(config)
     if variant_name not in VARIANTS:
         raise ValueError(f"unknown variant: {variant_name}")
-    prompt_arg = str(config["prompt"])
-    if resolve_from(REPO_ROOT, prompt_arg).exists():
-        prompt_arg = str(resolve_from(REPO_ROOT, prompt_arg))
+    prompt_arg = resolve_prompt_argument(str(config["prompt"]))
     action_map = actions.get("actions", {})
     if action_name not in action_map:
         raise ValueError(f"unknown action: {action_name}")

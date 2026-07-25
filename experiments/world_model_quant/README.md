@@ -156,6 +156,31 @@ BF16 的 `native_cache_bytes` 为 0 是统计接口只汇总 packed cache，并�
 BF16 tensor；两次 BF16 gate 均完成且未 OOM。峰值字段是在首次 BF16 gate 后加入，
 正式矩阵剩余 BF16 prompt 会记录精确值。84 帧五档通过后，恢复队列已自动放行。
 
+### 2026-07-25 HY dev 恢复计划
+
+`expansion_a_20260724` 的 Causal 正式矩阵已完成五档各 10 条；LongCat 已完成
+BF16 prefix、BF16/TRQ INT4/TRQ INT2/naive INT4 各 10 条，naive INT2 在
+2026-07-25 13:05 已完成 7/10 并继续运行。HY dev 在第一条生成前退出，产出为
+0/100。错误不是权重、数据或显存不足，而是 `runner.py` 对官方场景的长文本 prompt
+调用 `Path.exists()`，把文本误判为文件名并触发 `OSError: File name too long`。
+
+恢复按以下顺序执行：
+
+1. prompt 仅在确实对应现有文件时解析为绝对路径；任意长度的字面文本保持原样传给
+   HY-WorldPlay 的 `--input`；
+2. CPU 回归同时覆盖长字面 prompt 和真实 prompt 文件，现有动作、精度和受控变量
+   测试必须全部通过；
+3. 本地提交并推送后，远端只做一次 fast-forward 更新，不复制权重、结果或日志；
+4. GPU 2 空闲时只启动 `hy_worldplay full` recovery，继续使用原
+   `RUN_ID=expansion_a_20260724`。Causal 与 LongCat 的可解码输出不得重跑；
+5. recovery 必须独立记录 `running/done/failed` 和日志。只有 5 scenes x 4 actions x
+   5 modes 共 100 个视频全部存在且可由 `ffprobe` 解码，才能把 HY 工程状态改为
+   `done`；动作可控性仍需代理指标和人工审阅，不能由数量门代替。
+
+本次恢复只修复输入分派，不改变 prompt、conditioning image、动作序列、seed、生成
+长度或量化参数，因此 BF16/TRQ/naive 的受控比较仍然成立。HY recovery 完成前，
+Expansion A 只能标记为 partial，不能进入 holdout。
+
 Expansion A 的计划生成量为 210 个视频：Causal 50、LongCat 10 个 BF16 prefix 加
 50 个 continuation、HY dev 100。Causal length pilot 另计 45 个视频。HY holdout
 如获批准再追加 100 个视频。
