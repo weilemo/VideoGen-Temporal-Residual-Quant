@@ -13,37 +13,155 @@
 - H3：随生成长度增加，TRQ 的首次量化边界跳变和后期漂移低于 naive。
 - H4：HY-WorldPlay 中，TRQ 应保持 BF16 的动作方向、响应时机和反事实分离。
 
-| 基线 | 数据 | 正式矩阵 | 首要问题 |
-| --- | --- | --- | --- |
-| Causal Forcing | MovieGen10 | 10 prompts x 5 modes = 50 videos | 因果边界跳变和长期漂移 |
-| LongCat | MovieGen10 | 10 个固定 BF16 prefix + 10 continuations x 5 modes | 续写阶段的量化退化 |
-| HY-WorldPlay dev | 官方 test cases 1-5 | 5 scenes x 4 actions x 5 modes = 100 videos | 动作与反事实可控性 |
-| HY-WorldPlay holdout | 官方 test cases 6-10 | dev 通过后追加 100 videos | 独立场景确认 |
+当前结果支持把 H2 作为下一阶段的确认性假设：三条基线上 TRQ INT2 的
+PSNR/SSIM/LPIPS 均优于 naive INT2，HY 的 BF16 归一化反事实分离保留率为
+`0.886`，naive INT2 为 `0.510`。H1 仍是探索性假设：Causal 与 LongCat 的 INT4
+指标互有胜负，HY INT4 略偏向 naive，不能依据 10 个 prompt 或 5 个场景下结论。
 
 不能横向比较三种模型的绝对 VBench。报告各模型相对自身 BF16 的下降量。
 PSNR、SSIM 和 LPIPS 是同输入、同 seed 下的轨迹一致性指标，不是绝对视频质量。
+当前八维 VBench 聚合是仓库内归一化描述指标，不是官方 VBench Total Score。
 
-## 执行阶段与准入门
+## 2026-07-27 结果快照
 
-1. Smoke（已完成，2026-07-24）：每条基线用一个输入跑完五档精度，共 15 个
-   对比视频。三条 backend 均产生真实 packed cache 和非空视频；人工中点帧检查发现
-   Causal packed-naive INT2 已出现结构崩坏，而 TRQ INT2 保留主体和街景。HY 与
-   LongCat 未见中点帧灾难，但尚未建立动作可控性或长时质量结论。
-2. Causal length pilot：用三个 prompt 跑 21/42/84 帧和五档精度。选择最长的稳定
-   长度作为正式矩阵长度；若 BF16 自身失败，则该长度无效。
-3. Expansion A：Causal 和 LongCat 跑 MovieGen10；HY 跑官方 test cases 1-5 的
-   四动作五精度矩阵。生成后立即计算配对指标并人工审阅。
-4. Expansion B：只有 HY dev 没有新增 TRQ-only 动作反转或灾难时，才在官方
-   test cases 6-10 上复现同一矩阵。holdout 不用于调参。
-5. Review：逐样本盲审 identity switch、background jump、motion freeze、
-   color drift、action reversal、black/NaN 等灾难现象。
+Expansion A 的自动生成与统一评测已经完成；下面的数值均以同输入、同 seed 的 BF16
+为参考。人工 catastrophe/action review 尚未完成，因此科学状态仍是
+`automatic done, manual pending`。
 
-同 bit 下，只有当 TRQ 的配对指标优于 naive，并且没有新增 TRQ-only catastrophe
-时，才认为方法通过。VBench 数值只做描述，不单独充当硬门槛。10 个 prompt 只报告
-逐样本结果、中位数和 bootstrap 区间，不做过强的显著性结论。
+| 基线 | 模式 | PSNR | SSIM | LPIPS | 补充结果 |
+| --- | --- | ---: | ---: | ---: | --- |
+| Causal | TRQ INT4 / naive INT4 | 11.667 / 11.823 | 0.494 / 0.501 | 0.430 / 0.437 | INT4 混合 |
+| Causal | TRQ INT2 / naive INT2 | 10.438 / 9.372 | 0.440 / 0.376 | 0.555 / 0.674 | TRQ INT2 三项更优 |
+| LongCat | TRQ INT4 / naive INT4 | 30.248 / 30.303 | 0.929 / 0.924 | 0.026 / 0.031 | INT4 混合 |
+| LongCat | TRQ INT2 / naive INT2 | 23.333 / 19.904 | 0.827 / 0.727 | 0.081 / 0.170 | TRQ INT2 三项更优 |
+| HY-WAN | TRQ INT4 / naive INT4 | 20.585 / 20.715 | 0.721 / 0.724 | 0.134 / 0.132 | INT4 略偏 naive |
+| HY-WAN | TRQ INT2 / naive INT2 | 17.787 / 16.141 | 0.604 / 0.543 | 0.243 / 0.376 | TRQ INT2 三项更优 |
 
-LongCat 的配对指标跳过前 13 个共享 conditioning frames。HY 的 optical-flow
-方向和反事实分离是代理指标，必须与人工 action review 一起解释。
+HY 四种量化模式的 optical-flow 方向符号保持率均为 100%，该指标已经饱和。后续以
+反事实分离保留率、动作切换响应延迟和人工动作判断为主，方向符号只作为最低工程门。
+
+## 下一阶段总体矩阵
+
+### Causal Forcing 与 LongCat：MovieGen 嵌套扩样
+
+保持当前 prompt 顺序、seed、分辨率、生成长度和五档精度不变。每一级数据集包含前一级，
+只生成缺失索引，不重复 MovieGen10。B1 使用
+`temporalresidualkvquant/assets/moviegenbench_resume_32.txt`：前 10 条逐字保留已经生成
+的 `integrations/evaluation/moviegen10.txt`，后 22 条取自原 MovieGen32。原
+`moviegenbench_32.txt` 的弯引号与已运行列表不完全一致，不能直接用于文件级续跑。B2
+启动前按相同规则冻结 128 条超集，不能临时改 prompt 文本。
+
+| 阶段 | 数据集 | 新增 Causal | 新增 LongCat | 目的 |
+| --- | --- | ---: | ---: | --- |
+| B0 | MovieGen10 | 0 | 0 | 补人工盲审和逐 prompt 统计 |
+| B1 | MovieGen32 | 22 x 5 = 110 | 22 prefixes + 22 x 5 continuations | 确认效应方向并估计方差 |
+| B2 | MovieGen128 | 96 x 5 = 480 | 96 prefixes + 96 x 5 continuations | 形成论文主结果 |
+| B3 | MovieGen1003 | 暂不执行 | 暂不执行 | 只有最终论文需要全量时再批准 |
+
+B1 两条基线合计新增 220 个对比视频，另有 22 个 LongCat BF16 prefix；B2 在 B1
+基础上合计新增 960 个对比视频，另有 96 个 prefix。B1 通过人工灾难门后再启动 B2，
+不把 MovieGen1003 作为默认队列。
+
+每个阶段同时报告全部样本和 MovieGen motion/concept tag 子组。主统计单位是 prompt，
+使用 paired bootstrap 95% CI、配对胜率、中位数和 IQR；不能把视频帧当作独立样本来
+虚增显著性。INT2 是确认性比较，INT4 保持探索性并完整报告，不依据单一指标挑选结果。
+
+### 长时误差轴
+
+prompt 扩样不能替代 H3。B1 完成后，在冻结的 MovieGen32 子集上增加分段分析：
+
+- Causal 固定已通过工程门的 84 帧协议，分别统计首个量化边界、前段、中段和末段；
+- LongCat 固定 73 帧 conditioning context，并统计第 1、3、5、10 个 20-frame
+  continuation segment；
+- 每个检查点输出 PSNR/SSIM/LPIPS、boundary jump、累计漂移和 catastrophe tags；
+- LongCat 的配对指标继续跳过前 13 个共享 conditioning frames，不能与后续生成帧混算。
+
+如果当前 LongCat runtime 与 `73 context + 20-frame segment` 不一致，先记录当前协议，
+再新建 QVG-aligned 长度实验；禁止把不同协议的视频并入同一统计表。
+
+## HY-WorldPlay 双轨计划
+
+### Track H1：现有 HY-WAN 适配实验
+
+当前已完成官方 test cases 1-5，不重跑。人工审阅通过后，只补官方 cases 6-10：
+
+| 数据 | 动作 | 模式 | 新增量 |
+| --- | --- | --- | ---: |
+| HY 官方 cases 6-10 | `turn_left`、`turn_right`、`forward`、`backward` | 五档精度 | 100 videos |
+
+该轨用于验证现有 TRQ adapter 的跨场景稳定性，结果统一命名为 `HY-WAN adaptation`。
+WAN pipeline 是 HY-WorldPlay 的轻量路线，不能将其结果写成 QVG 论文的
+`HY-WorldPlay-8B` 复现。holdout 不用于改 prompt、动作时长、量化 block 或阈值。
+
+### Track H2：QVG-aligned HY-WorldPlay-8B
+
+[Quant VideoGen](https://arxiv.org/abs/2602.02958) 在 480p 下评估
+LongCat-Video-13B、HY-WorldPlay-8B 和 Self-Forcing-Wan-1.3B。HY 使用全历史条件和
+12-frame chunks；论文 Figure 1 展示 285 帧的 `right -> forward -> left` 轨迹。
+论文只说明使用 MovieGen prompt suite 并沿用 Self-Forcing prompt 设置，没有公开 HY
+输入图像的完整构造规则和确切样本数。因此本项目采用官方 HY 场景形成可重放协议，标记为
+`QVG-aligned`，不声称是完全复现。
+
+QVG-aligned 的顺序是：
+
+1. 新建并 smoke `HY-WorldPlay-8B/HunyuanVideo` backend；现有 WAN 结果不能复用为 8B
+   结果，但 adapter、量化 codec 和评测代码可以复用；
+2. 固定 480p、12-frame chunks、约 24 chunks/285 帧；在运行前验证真实输出帧数和
+   pose latent horizon 完全覆盖生成长度；
+3. 使用官方 10 个场景，执行 `right -> forward -> left` 和严格反事实
+   `left -> forward -> right` 两条等长轨迹；
+4. 先跑一个场景的 BF16 和五档单场景 gate，再运行 `10 scenes x 2 trajectories x
+   5 modes = 100` 条长视频；
+5. 所有模式使用相同初始图、prompt、seed、轨迹、chunk 数和 history policy。
+
+QVG 论文的主要基线是 RTN、KIVI 和 QuaRot，公平设置使用 block size 16，QuaRot 只量化
+KV cache。当前 packed-naive 继续作为历史对照；另在 5 场景 calibration 子集增加
+`RTN-B16`，先确认其与当前 naive 的差异。如果后续需要与 QVG 表格直接比较，再单独接入
+KIVI、QuaRot 和 QVG/QVG-Pro，不能把当前 naive 直接改名为论文 RTN。
+
+### HY 评价指标
+
+- BF16 轨迹一致性：PSNR、SSIM、LPIPS；
+- QVG 感知质量：Background Consistency、Imaging Quality、Subject Consistency、
+  Aesthetic Quality；
+- action：方向最低门、反事实分离保留率、动作切换响应延迟、每个 action segment 的
+  optical-flow 幅度；
+- 系统：实际 packed KV bytes、元数据开销、压缩率、peak CUDA memory 和端到端延迟；
+- 人工盲审：动作执行、切换时机、identity/background catastrophe、freeze、black/NaN。
+
+只有 BF16 本身具有可辨认的反事实分支，量化 action 指标才有效。TRQ 的预注册目标是
+保留至少 80% 的 BF16 反事实分离幅度、无方向反转，并在同 bit/相近实际压缩率下优于
+naive 或 RTN。代理指标必须与人工 action review 一起解释。
+
+## 执行顺序与准入门
+
+1. `Review A`：完成现有 MovieGen10/HY cases 1-5 的盲审、failure tags 和逐样本表；
+2. `Expansion B1`：Causal 与 LongCat 只补 MovieGen indices 10-31；
+3. `HY-WAN holdout`：只补官方 cases 6-10，不回改参数；
+4. `Expansion B2`：Review A 无 TRQ-only catastrophe，且 B1 没有出现 INT2 效应方向
+   反转时，只补 MovieGen indices 32-127；
+5. `HY-8B setup`：独立完成 backend、单场景五档 gate 和长轨迹 horizon gate；
+6. `HY-8B QVG-aligned`：通过 gate 后运行 10 场景、两条反事实长轨迹；
+7. `Final review`：按 baseline 报告 BF16 delta、统计区间、长时曲线、action 与系统指标。
+
+同 bit 下，只有当 TRQ 的配对指标优于 naive/RTN，并且没有新增 TRQ-only catastrophe
+时，才认为方法通过。B1 若区间较宽但效应方向未反转，允许进入 B2 以增加统计功效；
+出现 BF16 失败、量化静默回退、不可解码输出或重复 TRQ-only catastrophe 时，只停止
+对应 baseline，保留其他队列和全部故障证据。
+
+MovieGen32 与 HY-WAN holdout 的双 GPU 串行队列入口如下。两张卡并行，但每张卡内部
+严格串行；默认继续 `expansion_a_20260724`，仅补缺失的 10-31 和 cases 6-10：
+
+```bash
+CAUSAL_HY_GPU=6 LONGCAT_GPU=7 \
+  RUN_ID=expansion_a_20260724 \
+  STAGE_ID=expansion_b1_20260727 \
+  bash experiments/world_model_quant/run_expansion_b1_serial.sh
+```
+
+正式启动前用 `DRY_RUN=1` 检查 GPU、索引、prompt 文件与 HY holdout manifest。阶段状态
+写入 `results/world_model_quant/orchestration/<STAGE_ID>/`，生成日志写入
+`results/world_model_quant/logs/<STAGE_ID>/orchestrator/`。
 
 ## 远端同步
 

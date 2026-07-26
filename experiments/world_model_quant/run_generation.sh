@@ -50,11 +50,13 @@ case "${baseline}" in
     ;;
   longcat)
     output_root="${REPO_ROOT}/results/world_model_quant/longcat/${run_id}"
-    LIMIT="${limit}" START_INDEX="${start_index}" OUTPUT_ROOT="${output_root}" \
+    PROMPTS="${PROMPTS_SOURCE:-${REPO_ROOT}/integrations/evaluation/moviegen10.txt}" \
+      LIMIT="${limit}" START_INDEX="${start_index}" OUTPUT_ROOT="${output_root}" \
       bash "${REPO_ROOT}/integrations/longcat_video/run_moviegen10.sh" bf16 prefix \
       2>&1 | tee "${log_root}/longcat_prefix_bf16_${start_index}_${limit}.log"
     for variant in "${VARIANTS[@]}"; do
-      LIMIT="${limit}" START_INDEX="${start_index}" OUTPUT_ROOT="${output_root}" \
+      PROMPTS="${PROMPTS_SOURCE:-${REPO_ROOT}/integrations/evaluation/moviegen10.txt}" \
+        LIMIT="${limit}" START_INDEX="${start_index}" OUTPUT_ROOT="${output_root}" \
         bash "${REPO_ROOT}/integrations/longcat_video/run_moviegen10.sh" \
           "${variant}" continuation \
         2>&1 | tee "${log_root}/longcat_${variant}_${start_index}_${limit}.log"

@@ -138,6 +138,51 @@ def test_prompt_slice_selects_disjoint_longcat_shards(tmp_path):
     assert left != right
 
 
+def test_prompt_source_override_supports_moviegen32(tmp_path):
+    prompts = tmp_path / "moviegen32.txt"
+    prompts.write_text("".join(f"prompt {index}\n" for index in range(32)))
+    command = f"""
+      source {ROOT / 'common.sh'}
+      PROMPTS_SOURCE={prompts}
+      export PROMPTS_SOURCE
+      selected=$(prepare_prompt_slice 22 10 test_moviegen32)
+      printf '%s|%s|%s\n' "$(wc -l < "$selected")" "$(head -n 1 "$selected")" "$(tail -n 1 "$selected")"
+    """
+    result = subprocess.run(
+        ["bash", "-c", command], check=True, capture_output=True, text=True
+    )
+
+    assert result.stdout.strip() == "22|prompt 10|prompt 31"
+
+
+def test_expansion_b1_dry_run_uses_gpu_6_and_7(tmp_path):
+    prompts = tmp_path / "moviegen32.txt"
+    prompts.write_text("".join(f"prompt {index}\n" for index in range(32)))
+    holdout = tmp_path / "hy_scenes_holdout.json"
+    holdout.write_text('{"scenes": [{"id": "official_06"}]}')
+    result = subprocess.run(
+        ["bash", str(ROOT / "run_expansion_b1_serial.sh")],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "DRY_RUN": "1",
+            "HOME": str(tmp_path),
+            "PROMPTS_SOURCE": str(prompts),
+            "HY_SCENES": str(holdout),
+        },
+    )
+
+    assert "GPU 6" in result.stdout
+    assert "GPU 7" in result.stdout
+    assert "prompts 10-31" in result.stdout
+    assert "Causal" in result.stdout
+    assert "LongCat" in result.stdout
+    assert "HY official cases 6-10" in result.stdout
+    assert "No GPU commands executed" in result.stdout
+
+
 def test_causal_resume_selects_only_missing_or_invalid_outputs(tmp_path, monkeypatch):
     prompts = ["scene zero", "scene one", "scene two"]
     output = tmp_path / "videos"
