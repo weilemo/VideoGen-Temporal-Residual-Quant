@@ -22,26 +22,16 @@ cd /Users/moweile/Obsidian/Knowledge/Research/project/longvideo-kvcache-quant/co
 ## 当前接力点
 
 - 三基线实验统一入口：`experiments/world_model_quant/README.md`。
-  - 2026-07-24 已完成三条基线、五档精度的 15 个 smoke 视频；
-  - 扩展计划已获批准；`expansion_a_20260724` 的 Causal 21 帧五档各 3 条已完成；
-  - 42 帧 BF16 暴露固定 21 帧 KV cache 容量错误，恢复补丁使用
-    `kv_cache_capacity_frames=num_output_frames` 并增加写入边界诊断；
-  - 编排器按可解码视频续跑，Causal/HY/LongCat 独立记状态，信号退出按进程组清理；
-  - 42/84 帧五档单 prompt gate 均已通过；恢复队列已自动接管旧 LongCat，并从
-    `expansion_a_20260724` 的缺失 Causal pilot prompt 继续；
-  - 2026-07-25 Causal 与 LongCat 正式矩阵已完成；
-  - HY 长字面 prompt 分派已修复，只续跑同一 `RUN_ID` 的 HY 100-video 矩阵，不重跑
-    其他基线；
-  - 首次 prompt recovery 已停止：四动作只有 24 latent steps，短于 12 chunks 所需
-    48 steps，上游吞异常后留下 24 个 `err.txt`、0 个 MP4；必须先过 48-step horizon
-    校验和输出可解码校验；单场景 BF16 gate 已通过；
-  - 两次启动层故障分别来自未导出的 `RUN_ID` 和新终端 `(base)` 环境。错误目录已隔离；
-    公共入口现由 `VIDEOQUANT_ENV_PREFIX` 固定 `python/torchrun`。正确 recovery 于
-    2026-07-25 14:56 在 GPU 2 启动，完成前仍只能标记为 `running`；
-  - GPU 0 已关闭，待批准方案使用 GPU 2/4；
-  - Causal 先做 21/42/84 帧 length pilot，再跑 MovieGen10；
-  - HY 使用官方 test cases 1-5 作为 dev、6-10 作为 holdout，不重复 demo 图；
-  - LongCat 拆为 prompts 0-4 与 5-9；恢复时先等待并接管已有 GPU 2 进程，禁止重复跑；
+  - MovieGen10 / HY dev 的自动评测已完成；INT2 上三条基线均显示 TRQ 的
+    PSNR/SSIM/LPIPS 优于 naive，INT4 暂无一致优势；
+  - Expansion B1 生成于 2026-07-28 完成：Causal 新增五档各 22 条；LongCat 新增
+    22 个 BF16 prefix 与五档各 22 条 continuation；HY-WAN holdout 新增 100 条；
+  - LongCat 六个扩展目录均为 `22/22, bad=0`，双 GPU lane 均 exit 0；已有视频由
+    可解码检查跳过，没有重复生成；
+  - Causal 的 `failed:validation` 是旧 10 条与新增 22 条分处不同 worktree 导致的索引
+    缺口，不是生成失败。下一步先建立跨结果根的 MovieGen32 manifest；
+  - 当前只完成 B1 **远端生成**，尚未完成 32 条扩展集的统一指标、人工盲审、跨 seed
+    统计或正式 VBench 验收；这些完成前不启动 B2 MovieGen128；
   - 本地推送后，远端只运行一次 `pull_remote_once.sh`，不启动同步轮询。
 
 - 2026-07-20 在线分叉计划已实现于 `codex/trq-online-causal-gates`：
@@ -50,7 +40,8 @@ cd /Users/moweile/Obsidian/Knowledge/Research/project/longvideo-kvcache-quant/co
   - GPU E2/E3：`scripts/analysis/run_online_causal_diagnosis.sh`，只允许 GPU 2/3；
   - E4：`run_e4_candidates.sh` + `analyze_protection_gate.py`；
   - E5：`run_quality_gated_long_rollout.sh`，183/501/699 分阶段；VBench 数值仅报告，人工 catastrophe gate 未完成或失败时关闭。
-- 下一步不是继续改 codec，而是在 code-server 拉取本分支后先跑 E0/E1；E1 人工标签完整前不能启动 E5。
+- Self-Forcing E0/E1 自动指标已经完成；当前缺口是 K4V4 contact sheet 与人工 failure
+  tags。该人工门完整前不能启动 E5，也不能把 VBench 接近 BF16 写成视觉无损。
 - E6 不在本分支；只有质量 winner 冻结后才另开系统优化分支。
 
 - `Self-Forcing` 八条实验线均已跑通，七条完成 VBench 评估（2-prompt），一条完成 32-prompt VBench 评估：
@@ -76,32 +67,24 @@ cd /Users/moweile/Obsidian/Knowledge/Research/project/longvideo-kvcache-quant/co
 
 ## 下一位 agent 先做什么
 
-1. 先看 `docs/project/STATUS.md`，再看 `docs/project/MEMORY.md`
-2. 查看 VBench 对比结果：
-   - 2-prompt: `results/selfforcing/vbench_eval/comparison_summary.json`
-   - **32-prompt**: `results/selfforcing/vbench_eval_mb32/comparison_summary.json` ← 新
-3. 查看量化方案文档：`docs/quantization_approaches.md`
-4. 再看独立库结构：
-   - `temporalresidualkvquant/README.md`
-   - `temporalresidualkvquant/docs/self_forcing_integration.md`
-   - `temporalresidualkvquant/docs/workspace_structure.md`
-   - `temporalresidualkvquant/src/trq/headwise.py`
-5. **优先任务**：全矩阵比较已完成！下一步：
-   - Top-K × PRQ 叠加：DMD top-4 + PRQ int4+int2，可能的 SOTA 路线
-   - QVG PRQ INT2 32-prompt baseline（形成 BF16 / PRQ / Top-K 三足对照）
-   - 探索更优 importance metric（当前 DMD loss 在 int8+int4 下 top-k vs random 仅 +0.19pp）
-   - 考虑不同层可能需不同 k 的非均匀 top-k 策略
-   ```
-   # QVG PRQ INT2 32-prompt baseline
-   CUDA_VISIBLE_DEVICES=0 PROMPTS_PATH=assets/moviegenbench_32.txt \
-   OUTPUT_FOLDER=results/selfforcing/qvg_int2_mb32 \
-   bash scripts/self_forcing/run_int2_all.sh
-   ```
-6. 探索更好的 importance metric（当前 DMD loss top-4 在 int4+int2 下仅比 random 高 0.38pp）
-7. 如继续跑实验：
-   - Packed-naive R-HWQ-4h：`bash scripts/self_forcing/run_packed_naive_hwq.sh`
-   - 注意：`conda activate forcing`（包含 omegaconf 等依赖）
-8. 如涉及服务器资源，补看 [服务器工作习惯.md](/data2/moweile-20251213/服务器工作习惯.md)
+1. 先读 `docs/project/STATUS.md` 和 `experiments/world_model_quant/README.md`。
+2. 不再启动 Expansion B1 生成；先定位旧 MovieGen10 与新增 22 条结果根，生成 Causal
+   与 LongCat 的 MovieGen32 统一 manifest，并逐项做 `ffprobe` 完整性检查。
+3. 对统一索引运行 PSNR、SSIM、LPIPS、八维 VBench-derived、prompt-level bootstrap
+   95% CI 和逐 prompt 表；LongCat 保持跳过 13 个共享 conditioning frames。
+4. 完成 Causal/LongCat failure tags、长时分段漂移和 HY holdout action/感知盲审。
+5. 只有 B1 没有 TRQ-only catastrophe 且 INT2 效应方向未反转，才向用户申请启动 B2
+   MovieGen128；不得根据生成 `done` 自动放行。
+6. Self-Forcing 的独立阻塞仍是 K4V4 contact sheet / catastrophe gate；该门通过前不启动
+   501/699-frame rollout。
+7. 如涉及新 CUDA 任务，先重新核对当前 EPIC 租约与物理/逻辑 GPU 映射；旧 GPU 编号
+   和旧 hostname 只能作为历史证据。
+
+当前 B1 自动评测入口为 `experiments/world_model_quant/run_b1_evaluation.sh`。它要求显式
+提供 Causal/LongCat 的 legacy 与 B1 结果根，以及 HY holdout 根；默认分配 GPU 6/7，
+但启动前仍必须重新执行 `nvidia-smi` 并核对租约。索引器
+`prepare_moviegen32_manifest.py` 会在任何 GPU 工作前 fail closed，因此不要用手工复制
+视频绕过重复或缺失检查。
 
 ## 当前最重要信息
 

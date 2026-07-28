@@ -24,6 +24,23 @@ sys.modules[CAUSAL_SPEC.name] = causal_prepare
 assert CAUSAL_SPEC.loader is not None
 CAUSAL_SPEC.loader.exec_module(causal_prepare)
 
+MANIFEST_SPEC = importlib.util.spec_from_file_location(
+    "prepare_moviegen32_manifest", ROOT / "prepare_moviegen32_manifest.py"
+)
+moviegen_manifest = importlib.util.module_from_spec(MANIFEST_SPEC)
+sys.modules[MANIFEST_SPEC.name] = moviegen_manifest
+assert MANIFEST_SPEC.loader is not None
+MANIFEST_SPEC.loader.exec_module(moviegen_manifest)
+
+PAIRED_SPEC = importlib.util.spec_from_file_location(
+    "run_forcing_paired_metrics",
+    ROOT.parent / "paired_quality" / "run_forcing_paired_metrics.py",
+)
+paired_metrics = importlib.util.module_from_spec(PAIRED_SPEC)
+sys.modules[PAIRED_SPEC.name] = paired_metrics
+assert PAIRED_SPEC.loader is not None
+PAIRED_SPEC.loader.exec_module(paired_metrics)
+
 
 def test_official_hy_cases_split_into_fixed_dev_and_holdout(tmp_path):
     csv_path = tmp_path / "test_case.csv"
@@ -199,3 +216,106 @@ def test_causal_resume_selects_only_missing_or_invalid_outputs(tmp_path, monkeyp
 
     assert reused == 1
     assert missing == prompts[1:]
+
+
+def test_moviegen_manifest_merges_split_causal_roots(tmp_path):
+    prompts = [f"scene {index}" for index in range(4)]
+    roots = [("legacy", tmp_path / "legacy"), ("b1", tmp_path / "b1")]
+    for index, prompt in enumerate(prompts):
+        root = roots[0][1] if index < 2 else roots[1][1]
+        for variant in moviegen_manifest.VARIANTS:
+            directory = root / variant
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / moviegen_manifest.source_name("causal_forcing", prompt, index)).write_bytes(
+                f"{variant}-{index}".encode()
+            )
+
+    records = moviegen_manifest.build_records(
+        baseline="causal_forcing",
+        roots=roots,
+        prompts=prompts,
+        ffprobe_bin="ffprobe",
+        check_decode=False,
+    )
+    output = tmp_path / "normalized"
+    moviegen_manifest.materialize(records, output)
+
+    assert len(records) == 4 * 5
+    assert (output / "bf16" / "0-0.mp4").is_symlink()
+    assert (output / "trq_int2" / "3-0.mp4").is_symlink()
+    assert {record["source_label"] for record in records[:10]} == {"legacy"}
+    assert {record["source_label"] for record in records[10:]} == {"b1"}
+
+
+def test_moviegen_manifest_rejects_ambiguous_duplicate(tmp_path):
+    prompt = "duplicate scene"
+    roots = [("legacy", tmp_path / "legacy"), ("b1", tmp_path / "b1")]
+    filename = moviegen_manifest.source_name("causal_forcing", prompt, 0)
+    for _, root in roots:
+        directory = root / "bf16"
+        directory.mkdir(parents=True)
+        (directory / filename).write_bytes(b"video")
+
+    try:
+        moviegen_manifest.find_unique_source(
+            roots=roots, directory="bf16", filename=filename
+        )
+    except ValueError as exc:
+        assert "ambiguous duplicate" in str(exc)
+    else:
+        raise AssertionError("duplicate result roots must fail closed")
+
+
+def test_paired_bootstrap_reports_positive_trq_advantage():
+    def summary(values):
+        return {
+            "per_video": [
+                {
+                    "idx": index,
+                    "sample_idx": 0,
+                    "psnr": psnr,
+                    "ssim": ssim,
+                    "lpips": lpips,
+                }
+                for index, (psnr, ssim, lpips) in enumerate(values)
+            ]
+        }
+
+    trq = summary([(12.0, 0.6, 0.2), (11.0, 0.5, 0.3)])
+    naive = summary([(10.0, 0.4, 0.4), (10.0, 0.4, 0.5)])
+    result = paired_metrics.paired_bootstrap(trq, naive, resamples=100, seed=7)
+
+    assert result["paired_video_count"] == 2
+    assert all(
+        metric["trq_advantage_mean"] > 0 for metric in result["metrics"].values()
+    )
+    assert all(metric["paired_win_rate"] == 1.0 for metric in result["metrics"].values())
+
+
+def test_b1_evaluation_dry_run_assigns_gpu_6_and_7(tmp_path):
+    prompts = tmp_path / "moviegen32.txt"
+    prompts.write_text("".join(f"prompt {index}\n" for index in range(32)))
+    roots = [tmp_path / name for name in ("causal_old", "causal_b1", "longcat_old", "longcat_b1")]
+    for root in roots:
+        root.mkdir()
+    result = subprocess.run(
+        ["bash", str(ROOT / "run_b1_evaluation.sh")],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "DRY_RUN": "1",
+            "PROMPTS_SOURCE": str(prompts),
+            "CAUSAL_LEGACY_ROOT": str(roots[0]),
+            "CAUSAL_B1_ROOT": str(roots[1]),
+            "LONGCAT_LEGACY_ROOT": str(roots[2]),
+            "LONGCAT_B1_ROOT": str(roots[3]),
+            "HY_ROOT": str(tmp_path / "hy"),
+            "HOME": str(tmp_path),
+        },
+    )
+
+    assert "GPU 6" in result.stdout
+    assert "GPU 7" in result.stdout
+    assert "No manifests, metrics, or GPU jobs were started" in result.stdout

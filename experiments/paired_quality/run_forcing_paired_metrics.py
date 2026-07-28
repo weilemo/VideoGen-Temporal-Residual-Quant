@@ -8,6 +8,8 @@ import csv
 import importlib.util
 import json
 import math
+import random
+import statistics
 from pathlib import Path
 
 
@@ -50,6 +52,56 @@ def validate_summary(summary: dict, expected_videos: int | None) -> None:
         raise ValueError(f"mean_psnr is missing or NaN: {psnr}")
 
 
+def paired_bootstrap(
+    trq_summary: dict,
+    naive_summary: dict,
+    *,
+    resamples: int,
+    seed: int,
+) -> dict:
+    trq_rows = {
+        (row["idx"], row["sample_idx"]): row for row in trq_summary["per_video"]
+    }
+    naive_rows = {
+        (row["idx"], row["sample_idx"]): row for row in naive_summary["per_video"]
+    }
+    if set(trq_rows) != set(naive_rows):
+        raise ValueError("TRQ and naive per-video index sets differ")
+    keys = sorted(trq_rows)
+    if not keys:
+        raise ValueError("cannot bootstrap an empty paired result set")
+    rng = random.Random(seed)
+    metrics = {
+        "psnr": lambda trq, naive: trq - naive,
+        "ssim": lambda trq, naive: trq - naive,
+        "lpips": lambda trq, naive: naive - trq,
+    }
+    output = {}
+    for metric, advantage in metrics.items():
+        values = [
+            advantage(trq_rows[key][metric], naive_rows[key][metric]) for key in keys
+        ]
+        samples = []
+        for _ in range(resamples):
+            draw = [values[rng.randrange(len(values))] for _ in values]
+            samples.append(statistics.fmean(draw))
+        samples.sort()
+        low = samples[int(0.025 * (len(samples) - 1))]
+        high = samples[int(0.975 * (len(samples) - 1))]
+        output[metric] = {
+            "trq_advantage_mean": statistics.fmean(values),
+            "bootstrap_95_ci": [low, high],
+            "paired_win_rate": sum(value > 0 for value in values) / len(values),
+            "positive_means": "TRQ is closer to BF16 than naive",
+        }
+    return {
+        "paired_video_count": len(keys),
+        "bootstrap_resamples": resamples,
+        "bootstrap_seed": seed,
+        "metrics": output,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -81,7 +133,12 @@ def main() -> None:
         help="Skip shared prefix/conditioning frames before comparison",
     )
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--bootstrap-resamples", type=int, default=2000)
+    parser.add_argument("--bootstrap-seed", type=int, default=20260728)
     args = parser.parse_args()
+
+    if args.bootstrap_resamples <= 0:
+        parser.error("--bootstrap-resamples must be positive")
 
     repo_root = Path(__file__).resolve().parents[2]
     evaluator = load_evaluator(repo_root)
@@ -91,6 +148,7 @@ def main() -> None:
     variants = args.variant or [parse_variant(value) for value in DEFAULT_VARIANTS]
 
     rows = []
+    summaries = {}
     for variant, relative_dir in variants:
         summary = evaluator.evaluate_directories(
             root / args.reference,
@@ -113,9 +171,22 @@ def main() -> None:
         (output_dir / f"{variant}.json").write_text(
             json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
         )
+        summaries[variant] = summary
         rows.append({key: summary[key] for key in (
             "baseline", "variant", "num_videos", "mean_psnr", "mean_ssim", "mean_lpips"
         )})
+
+    comparisons = {}
+    for bits in ("int4", "int2"):
+        trq_name = f"trq_{bits}"
+        naive_name = f"naive_{bits}"
+        if trq_name in summaries and naive_name in summaries:
+            comparisons[bits] = paired_bootstrap(
+                summaries[trq_name],
+                summaries[naive_name],
+                resamples=args.bootstrap_resamples,
+                seed=args.bootstrap_seed,
+            )
 
     aggregate = {
         "baseline": args.baseline,
@@ -126,6 +197,7 @@ def main() -> None:
         "higher_is_better": ["psnr", "ssim"],
         "lower_is_better": ["lpips"],
         "variants": rows,
+        "paired_trq_vs_naive": comparisons,
     }
     (output_dir / "summary.json").write_text(
         json.dumps(aggregate, indent=2, ensure_ascii=False), encoding="utf-8"

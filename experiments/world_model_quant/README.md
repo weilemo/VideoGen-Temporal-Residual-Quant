@@ -22,11 +22,22 @@ PSNR/SSIM/LPIPS 均优于 naive INT2，HY 的 BF16 归一化反事实分离保�
 PSNR、SSIM 和 LPIPS 是同输入、同 seed 下的轨迹一致性指标，不是绝对视频质量。
 当前八维 VBench 聚合是仓库内归一化描述指标，不是官方 VBench Total Score。
 
-## 2026-07-27 结果快照
+## 2026-07-28 实验进展
 
-Expansion A 的自动生成与统一评测已经完成；下面的数值均以同输入、同 seed 的 BF16
-为参考。人工 catastrophe/action review 尚未完成，因此科学状态仍是
-`automatic done, manual pending`。
+MovieGen10 / HY dev 的自动生成与统一评测已经完成；下面的数值均以同输入、同 seed 的
+BF16 为参考。Expansion B1 的扩展视频也已全部生成并通过可解码检查，但扩展集统一评测
+和人工 catastrophe/action review 尚未完成，因此科学状态仍是
+`B0 automatic done; B1 generation done, evaluation pending; manual pending`。
+
+| 基线与阶段 | 已完成生成 | 完整性状态 | 下一步 |
+| --- | ---: | --- | --- |
+| Causal B1 | indices 10-31，五档各 22 条，共 110 条 | 生成 exit 0；旧 10 条与新增 22 条分处不同结果根 | 建立 32 条统一 manifest 后评测 |
+| LongCat B1 | 22 个 BF16 prefix；五档 continuation 各 22 条，共 132 条 | 六个目录均 `22/22, bad=0`；双 GPU lane 均 exit 0 | 评测 32 条超集并做分段漂移分析 |
+| HY-WAN holdout | cases 6-10，四动作五档，共 100 条 | `done`，100 条可解码 | action proxy、感知指标和人工盲审 |
+
+Causal 编排状态曾显示 `failed:validation`，原因是验证器只扫描当前 checkout，而旧
+MovieGen10 结果位于另一个运行 worktree。该状态是结果索引缺陷，不是模型生成失败；
+禁止通过重跑 22 条扩展视频来修复。
 
 | 基线 | 模式 | PSNR | SSIM | LPIPS | 补充结果 |
 | --- | --- | ---: | ---: | ---: | --- |
@@ -83,7 +94,7 @@ prompt 扩样不能替代 H3。B1 完成后，在冻结的 MovieGen32 子集上�
 
 ### Track H1：现有 HY-WAN 适配实验
 
-当前已完成官方 test cases 1-5，不重跑。人工审阅通过后，只补官方 cases 6-10：
+官方 test cases 1-5 与 holdout cases 6-10 均已生成，不重跑。2026-07-28 已补齐：
 
 | 数据 | 动作 | 模式 | 新增量 |
 | --- | --- | --- | ---: |
@@ -135,14 +146,50 @@ naive 或 RTN。代理指标必须与人工 action review 一起解释。
 
 ## 执行顺序与准入门
 
-1. `Review A`：完成现有 MovieGen10/HY cases 1-5 的盲审、failure tags 和逐样本表；
-2. `Expansion B1`：Causal 与 LongCat 只补 MovieGen indices 10-31；
-3. `HY-WAN holdout`：只补官方 cases 6-10，不回改参数；
-4. `Expansion B2`：Review A 无 TRQ-only catastrophe，且 B1 没有出现 INT2 效应方向
+1. `[pending] Review A`：完成 MovieGen10 与 HY cases 1-5 的盲审、failure tags 和逐样本表；
+2. `[done] Expansion B1 generation`：Causal 与 LongCat 已补 MovieGen indices 10-31；
+3. `[done] HY-WAN holdout generation`：官方 cases 6-10 已补齐，未据 holdout 回改参数；
+4. `[next] B1 unified evaluation`：统一 Causal/LongCat 的 32 条索引，运行配对指标、
+   VBench-derived、prompt-level bootstrap CI、分段漂移与人工 failure tags；
+5. `[blocked] Expansion B2`：Review A 无 TRQ-only catastrophe，且 B1 没有出现 INT2 效应方向
    反转时，只补 MovieGen indices 32-127；
-5. `HY-8B setup`：独立完成 backend、单场景五档 gate 和长轨迹 horizon gate；
-6. `HY-8B QVG-aligned`：通过 gate 后运行 10 场景、两条反事实长轨迹；
-7. `Final review`：按 baseline 报告 BF16 delta、统计区间、长时曲线、action 与系统指标。
+6. `HY-8B setup`：独立完成 backend、单场景五档 gate 和长轨迹 horizon gate；
+7. `HY-8B QVG-aligned`：通过 gate 后运行 10 场景、两条反事实长轨迹；
+8. `Final review`：按 baseline 报告 BF16 delta、统计区间、长时曲线、action 与系统指标。
+
+### B1 统一索引与自动评测
+
+旧 MovieGen10 与新增 22 条结果允许位于不同结果根，但评测前必须先生成规范化的只读
+符号链接视图。索引器会逐 prompt、逐精度检查缺失、跨根重复和 `ffprobe` 可解码性；
+任一检查失败时不会启动 GPU 指标：
+
+```bash
+python experiments/world_model_quant/prepare_moviegen32_manifest.py \
+  --baseline causal_forcing \
+  --prompts temporalresidualkvquant/assets/moviegenbench_resume_32.txt \
+  --source-root legacy=/path/to/causal/moviegen10 \
+  --source-root b1=/path/to/causal/expansion_b1 \
+  --output-root results/world_model_quant/indexes/b1_moviegen32/causal_forcing
+```
+
+两张卡并行执行，GPU 6 负责 Causal 后接 HY holdout，GPU 7 负责 LongCat；每张卡内部
+严格串行。脚本先建 Causal/LongCat manifest，再运行 BF16-reference
+PSNR/SSIM/LPIPS、TRQ-vs-naive prompt-level bootstrap 95% CI 和八维 VBench-derived：
+
+```bash
+CAUSAL_GPU=6 LONGCAT_GPU=7 \
+CAUSAL_LEGACY_ROOT=/path/to/causal/moviegen10 \
+CAUSAL_B1_ROOT=/path/to/causal/expansion_b1 \
+LONGCAT_LEGACY_ROOT=/path/to/longcat/moviegen10 \
+LONGCAT_B1_ROOT=/path/to/longcat/expansion_b1 \
+HY_ROOT=/path/to/hy/action_control_holdout \
+RUN_ID=b1_moviegen32_20260728 \
+  bash experiments/world_model_quant/run_b1_evaluation.sh
+```
+
+`paired_metrics/summary.json` 中的 `paired_trq_vs_naive` 以正值统一表示 TRQ 比 naive
+更接近同 prompt、同 seed 的 BF16；它仍是轨迹相似度，不是绝对视频质量。脚本的
+`.done` 标记只证明对应自动阶段完成，不能替代人工 catastrophe/action review。
 
 同 bit 下，只有当 TRQ 的配对指标优于 naive/RTN，并且没有新增 TRQ-only catastrophe
 时，才认为方法通过。B1 若区间较宽但效应方向未反转，允许进入 B2 以增加统计功效；
@@ -158,6 +205,11 @@ CAUSAL_HY_GPU=6 LONGCAT_GPU=7 \
   STAGE_ID=expansion_b1_20260727 \
   bash experiments/world_model_quant/run_expansion_b1_serial.sh
 ```
+
+该 B1 生成队列已在 2026-07-28 完成，命令保留用于复现和故障恢复，不应在现有结果上
+重复启动。LongCat 最后 57 条曾按互斥索引拆到两张 GPU：一张完成剩余 TRQ INT2 并生成
+naive INT2 indices 10-24，另一张生成 naive INT4 全 22 条及 naive INT2 indices 25-31。
+输出文件与 manifest 区间互斥，最终由统一可解码门验收。
 
 正式启动前用 `DRY_RUN=1` 检查 GPU、索引、prompt 文件与 HY holdout manifest。阶段状态
 写入 `results/world_model_quant/orchestration/<STAGE_ID>/`，生成日志写入

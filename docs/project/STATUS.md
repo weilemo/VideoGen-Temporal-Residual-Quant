@@ -7,36 +7,25 @@
 
 ## 正在做什么
 
-- **三基线 TRQ smoke 已完成，扩展队列正在故障恢复（2026-07-24）**：
-  - Causal Forcing 与 LongCat 使用 MovieGen10；HY-WorldPlay 使用多场景动作条件协议；
-  - 五档精度统一为 BF16、TRQ INT4/INT2、packed-naive INT4/INT2；
-  - `experiments/world_model_quant/` 提供 smoke、Causal 长度 pilot、两张 A100
-    队列、配对指标、VBench 和 HY action proxy 入口；
-  - LongCat 配对指标跳过 13 个共享 conditioning frames；
-  - 远端已完成 15 个 smoke 视频，三条 GPU backend 的五档调用链均能产出视频；
-  - 人工中点帧检查中，Causal packed-naive INT2 出现结构崩坏，TRQ INT2 保留主体与
-    街景；HY 和 LongCat 中点帧未见灾难，但动作可控性、长时质量和统计指标仍未验证；
-  - GPU 0 已关闭；使用 GPU 2/4 自动运行 MovieGen10、Causal length pilot 和 HY
-    官方 10 场景 dev/holdout 协议，先启动 dev，holdout 仍需人工批准；
-  - `expansion_a_20260724` 已完成 Causal 21 帧五档各 3 条；42 帧 BF16 因 cache
-    容量仍固定为 21 帧而失败，GPU 4 已退出；GPU 2 的 LongCat 子进程继续保留结果；
-  - 修复将 cache 容量显式绑定 `num_output_frames`，并把编排改为可解码文件级恢复、
-    独立阶段状态与进程组清理；先通过 42/84 帧单 prompt gate 再恢复正式队列；
-  - 修复后 42/84 帧五档单 prompt gate 均通过；84 帧四个量化模式峰值 CUDA 为
-    23.44-26.46 GB，恢复编排已接管既有 LongCat 并补齐剩余 Causal pilot；
-  - 2026-07-25，Causal 与 LongCat 正式矩阵已完成；HY 的 `turn_left` BF16 单视频
-    gate 已生成可解码视频；
-  - HY dev 在生成前因长字面 prompt 被 `Path.exists()` 当成文件路径而失败，当前
-    0/100；恢复方案保持文本 prompt 原样传入，完成 CPU 回归后只续跑 HY，不重复
-    Causal 或 LongCat。HY 的工程门仍是 100 个可解码视频，科学门仍需动作指标与盲审；
-  - prompt 修复后的首次 recovery 又发现正式动作仅覆盖 24/48 latent steps；上游将
-    `curr_viewmats` 空切片错误写入 `err.txt` 却返回 0。已在 0 个 MP4、24 个错误日志
-    时停止并释放 GPU 2；现已补 48-step 动作、启动前 horizon gate 和生成后视频门；
-  - 首次全矩阵接续因 `RUN_ID` 未导出误写到隔离的 `action_control_full/`，第二次因新
-    终端落回 `(base)` 而缺少 `remote_pdb`。公共入口现统一绑定 `videoquant` 的
-    `python/torchrun`；2026-07-25 14:56 正确 `RUN_ID` 的 recovery 已在 GPU 2 进入
-    权重加载后的推理阶段，只补 HY 缺失输出；
-  - 远端代码同步改为 GitHub commit 后的一次性 fast-forward pull，不做远端轮询。
+- **三基线 MovieGen10 自动评测完成，Expansion B1 生成完成（2026-07-28）**：
+  - 五档精度统一为 BF16、TRQ INT4/INT2、packed-naive INT4/INT2；LongCat 配对指标
+    跳过 13 个共享 conditioning frames；
+  - MovieGen10 / HY dev 的 PSNR、SSIM、LPIPS、八维 VBench-derived 汇总和 HY action
+    proxy 已生成。INT2 上三条基线的 TRQ 配对指标均优于 naive；INT4 结果互有胜负；
+  - 当前八维聚合不是官方 VBench Total，配对指标衡量 BF16 轨迹相似度，不是绝对质量；
+    人工 catastrophe/action review 和跨 seed 统计仍未完成；
+  - `expansion_b1_20260727` 只补缺失数据：Causal MovieGen indices 10-31 五档各 22 条，
+    LongCat 同索引 22 条 BF16 prefix 加五档 continuation 各 22 条，HY-WAN 官方 cases
+    6-10 的四动作五档共 100 条；
+  - 2026-07-28 完整性门确认上述扩展输出全部存在且可解码。LongCat 最后阶段拆为两张
+    A100 的互斥索引 shard，两个 lane 均 exit 0，六个目录均为 `22/22, bad=0`；
+  - Causal 曾显示 `failed:validation`，根因是旧 MovieGen10 与新增 22 条分处不同结果
+    worktree，当前 checkout 的验证器只看见 22/32；生成本身 exit 0。统一评测前必须先
+    建立跨结果根的 32 条索引，不能重跑或把该状态解释成模型失败；
+  - **当前接力点**：不再生成 B1 视频；先统一 Causal/LongCat MovieGen32 索引，计算扩展
+    集 PSNR、SSIM、LPIPS、VBench-derived、prompt-level bootstrap CI 和人工 failure tags。
+    完成 B1 人工门前不启动 B2 MovieGen128；
+  - 远端代码同步继续使用 GitHub commit 后的一次性 fast-forward pull，不做远端轮询。
 
 - **仓库所有权边界已整理（2026-07-24）**：
   - `temporalresidualkvquant/` 继续作为 TRQ 方法主库；
@@ -85,6 +74,16 @@
   - `policy granularity`：确定全模型统一、per-layer、per-chunk、sink/history/tail、K/V 分开，或按 prompt 类型自适应的 top-k 策略。
 
 ## 最近完成
+
+- **B1 统一索引与评测入口完成（2026-07-28）**：
+  - 新增 `prepare_moviegen32_manifest.py`，支持把 MovieGen10 与 B1 的分裂结果根规范化
+    为 32 条五档只读视图，并在创建索引前检查缺失、重复和可解码性；
+  - 新增 `run_b1_evaluation.sh`：GPU 6 执行 Causal 后接 HY，GPU 7 执行 LongCat，
+    两条 lane 并行且单 lane 内严格串行，完成标记支持断点续跑；
+  - paired metrics 新增 prompt-level TRQ-vs-naive bootstrap 95% CI，正值统一表示 TRQ
+    更接近 BF16；
+  - 本地 13 项 orchestration 合成测试通过。当前只证明评测代码就绪，远端 manifest、
+    GPU 指标和人工验收仍以实际运行产物为准。
 
 - **32-prompt 全矩阵 VBench 对比 + k 消融 + int4+int2 sweep**（2026-05-22）：
   - 完成 12 条实验线的 180-frames MovieGenVideoBench 评估（前 32 prompts）：
@@ -215,33 +214,22 @@
 
 ## 当前阻塞 / 未完成
 
-- E1 仍需在集群复用现有 48 条视频完成 VBench，并人工填写定性 failure tags；
-- E2/E3 只完成代码与 CPU/dry-run 验证，尚未生成新 GPU 结果；
-- E4 候选必须依据 E2/E3 结果选择，当前没有预先指定 winner；
-- E6 Triton/decoded-cache 优化尚未启动，符合质量 winner 冻结后另开分支的计划。
-
-- head importance 目前采用 focused-forcing head ablation 的 DMD loss 聚合；后续仍需评估它和 identity / scene / motion 质量维度的相关性。
-- Top-K vs random 的增益在 int4+int2 下仅 +0.38pp（0.6303 vs 0.6279），在 int8+int4 下尚未有 random 对照
-- 当前 per-layer top-4 DMD-loss 策略可能过于粗略：per-chunk top-k、K/V 分开选头、不同 prompt 类型自适应等更细粒度策略尚未实验
+- Expansion B1 只有生成与可解码门完成；MovieGen32 / HY holdout 的统一指标、provenance、
+  prompt-level CI、人工 failure tags 和跨 seed 证据尚未完成；
+- Causal 的旧 10 条与新增 22 条分处不同结果 worktree，必须先构造统一 manifest；
+- Self-Forcing E1 自动指标已完成，但 K4V4 人工 catastrophe gate 仍未完成；该门通过前
+  不启动 501/699-frame rollout；
+- E2/E3 只有代码与 CPU/dry-run 证据；E4 不能在没有 E2/E3 和人工门的情况下预选 winner；
+- HY-WAN adaptation 不是 HY-WorldPlay-8B/QVG 的完整复现，HY-8B backend 和长轨迹协议
+  仍需独立 gate；
+- E6 Triton/decoded-cache 优化继续等质量 winner 冻结后另开分支。
 
 ## 下一步
 
-- **优先**: 统一实验矩阵已基本完成，接下来聚焦：
-  - Top-K × PRQ 叠加：DMD top-4 + PRQ int4+int2，可能的 SOTA 路线
-  - QVG PRQ INT2 的 32-prompt 结果，完成 BF16 / PRQ / Top-K 三足对照
-  - 探索更优 importance metric（当前 DMD loss 在 int8+int4 下 top-k vs random 仅 +0.19pp）
-  - Prompt-adaptive policy：在 `videoquant-prompt` 中基于 `HWQ_prompt_router` 继续构造 bucket-specific policies。
-  - First-chunks online calibration：在 `videoquant-online` 中继续验证 runtime policy 的质量和 selected-head overlap。
-- **论文叙事方向**：
-  - int8+int4 全部方案近乎无损（<0.5%），可作为 "安全压缩" 定位
-  - int4+int2 需要 top-k head importance（↓2.89% vs ↓5.20%），展示 head-wise 价值
-  - k 的收益递减分析：int8+int4 仅需 k=2，int4+int2 需 k=8
-- 统一实验矩阵当前状态：
-  - BF16 baseline：✅ ↓0.00%，~80 GB (2p) / ✅ 61.9 GB (32p)
-  - QVG INT2 (PRQ)：✅ ↓0.26%，~20 GB (2p) / ❌ 待跑 32p
-  - R-HWQ-4h PRQ (int4+int2)：✅ ↓1.07%，~20 GB (2p)
-  - R-HWQ-4h Packed (int8+int4)：✅ ↓0.10%，~40 GB (2p) / ✅ Rand4 ↓0.44% (32p)
-  - R-HWQ-4h Packed (int4+int2)：✅ ↓3.19%，~26 GB (2p) / ✅ Rand4 ↓4.79% (32p)
-  - Top-K HWQ Packed (int4+int2)：✅ ↓2.82%，26 GB (2p) / ✅ TK4 ↓4.34% (32p)
-  - Top-K HWQ Packed (int8+int4)：✅ ↓0.23%, 33.6 GB (32p) / ✅ k-sweep 全完成
-  - R-HWQ-2h：❌ 待跑
+1. 建立 Causal/LongCat MovieGen32 统一结果索引并验证 32 条 x 5 modes 的对应关系；
+2. 运行扩展集 PSNR、SSIM、LPIPS、VBench-derived、bootstrap CI 与长时分段指标；
+3. 完成 B1 与 HY holdout 的人工 catastrophe/action review；
+4. 将自动指标、人工标签、actual KV bytes、peak memory 和 latency 整合为按 baseline 的
+   BF16 delta 表；
+5. 依据预注册门决定 B2 MovieGen128 是否获准，不因样本已生成而默认继续扩张；
+6. 并行完成 Self-Forcing K4V4 人工 gate，之后再决定 E2/E3、E5 或 K-predicts-V。
