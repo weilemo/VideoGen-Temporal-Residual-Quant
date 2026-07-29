@@ -24,6 +24,7 @@ CALIBRATION_DUMPS='/path/to/calibration/*_layer*.pt' \
 VALIDATION_DUMPS='/path/to/heldout/*_layer*.pt' \
 LAYERS='8-19' \
 UNIT_SIZE=1560 \
+QUANTILE_MAX_SAMPLES=262144 \
 OUTPUT_DIR="$PWD/results/conditional_innovation/e1_$(date +%Y%m%d_%H%M%S)" \
 bash scripts/analysis/run_conditional_innovation_e1.sh
 ```
@@ -39,6 +40,11 @@ writing its report.
 - `prompt_rows.csv`: prompt-level ratios used by the bootstrap.
 - `conditional_innovation_params.pt`: frozen Cross parameters and, only after
   Gate 0 passes, fitted bounded gamma values.
+- `cross_kv_checkpoint.pt`: Cross-KV parameters written before Gate 0
+  evaluation, so a later diagnostic failure does not erase the fitted model.
+- `hybrid_checkpoint.pt`: Cross-KV plus gamma parameters written before Gate 1
+  evaluation when Gate 0 passes.
+- `progress.json`: last completed experiment stage.
 - `manifest.json`: exact dump paths, arguments, and source Git SHA.
 - `report.md`: compact human-readable result with explicit evidence boundary.
 
@@ -46,6 +52,12 @@ The shuffled negative control takes the prior innovation from a different
 validation prompt while preserving layer/head/unit geometry. The experiment
 uses only complete units so the final partial unit cannot create an alignment
 artifact.
+
+MSE, NMSE, and all gate ratios are exact full-data reductions. Distribution
+standard deviations are also exact. Only the diagnostic absolute p99 uses a
+fixed-seed, proportionally stratified sample capped by
+`QUANTILE_MAX_SAMPLES`; the recorded `*_p99_samples` columns make that bound
+explicit.
 
 ## Interpretation
 

@@ -6,6 +6,7 @@ from trq.analysis.conditional_innovation import (
     CrossKVAccumulator,
     GammaAccumulator,
     bootstrap_median_ci,
+    distribution_stats,
     evaluate_layer,
     innovation_units,
 )
@@ -59,6 +60,40 @@ class ConditionalInnovationTests(TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first["prompts"], 4)
         self.assertAlmostEqual(float(first["median"]), 0.85)
+
+    def test_distribution_quantile_is_bounded_and_deterministic(self):
+        generator = torch.Generator().manual_seed(23)
+        chunks = [torch.randn(1, 2, 4096, 3, generator=generator) for _ in range(4)]
+
+        first = distribution_stats(
+            chunks,
+            1,
+            quantile=0.99,
+            max_quantile_samples=257,
+            seed=19,
+        )
+        second = distribution_stats(
+            chunks,
+            1,
+            quantile=0.99,
+            max_quantile_samples=257,
+            seed=19,
+        )
+        exact = torch.cat([chunk[:, 1].reshape(-1) for chunk in chunks])
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["count"], exact.numel())
+        self.assertEqual(first["quantile_samples"], 257)
+        self.assertAlmostEqual(float(first["std"]), float(exact.std(unbiased=False)), places=5)
+
+    def test_distribution_quantile_rejects_invalid_budget(self):
+        with self.assertRaisesRegex(ValueError, "max_quantile_samples"):
+            distribution_stats(
+                [torch.ones(1, 1, 4, 2)],
+                0,
+                quantile=0.99,
+                max_quantile_samples=0,
+            )
 
     @staticmethod
     def _sequence(seed: int, unit_size: int) -> tuple[torch.Tensor, torch.Tensor]:

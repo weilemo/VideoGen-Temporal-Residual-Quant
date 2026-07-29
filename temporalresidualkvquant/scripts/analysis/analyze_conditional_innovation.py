@@ -53,6 +53,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gamma-ridge", type=float, default=1e-6)
     parser.add_argument("--gamma-rho", type=float, default=0.95)
     parser.add_argument("--bootstrap-resamples", type=int, default=2000)
+    parser.add_argument(
+        "--quantile-max-samples",
+        type=int,
+        default=262_144,
+        help="Maximum deterministic samples per head for diagnostic p99 statistics",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--cross-ratio-threshold", type=float, default=0.90)
     parser.add_argument("--correction-ratio-threshold", type=float, default=0.90)
@@ -82,7 +88,22 @@ def main() -> int:
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    print(f"[cross-fit] fitting {len(calibration_paths)} calibration shards", flush=True)
     models = _fit_cross_models(calibration_paths, args.layers, args.cross_ridge)
+    parameters: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "predictor_kind": "cross_kv",
+        "layers": {
+            layer: {"cross_weight": model.weight, "cross_bias": model.bias}
+            for layer, model in models.items()
+        },
+    }
+    torch.save(parameters, output_dir / "cross_kv_checkpoint.pt")
+    _write_json(
+        output_dir / "progress.json",
+        {"schema_version": SCHEMA_VERSION, "stage": "cross_fit_complete"},
+    )
+    print("[cross-fit] checkpoint saved; evaluating Gate 0", flush=True)
     cross_rows = _evaluate_paths(
         validation_paths,
         args.layers,
@@ -90,6 +111,7 @@ def main() -> int:
         gammas=None,
         requested_unit_size=args.unit_size,
         seed=args.seed,
+        quantile_max_samples=args.quantile_max_samples,
     )
     cross_prompt_rows = prompt_aggregates(cross_rows)
     cross_ci = bootstrap_median_ci(
@@ -102,14 +124,6 @@ def main() -> int:
         and float(cross_ci["ci95_upper"]) < 1.0
     )
 
-    parameters: dict[str, Any] = {
-        "schema_version": SCHEMA_VERSION,
-        "predictor_kind": "cross_kv",
-        "layers": {
-            layer: {"cross_weight": model.weight, "cross_bias": model.bias}
-            for layer, model in models.items()
-        },
-    }
     summary: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": "STOPPED_CROSS_GATE",
@@ -123,8 +137,17 @@ def main() -> int:
         "gate1_correction": {"status": "NOT_RUN"},
     }
     final_rows = cross_rows
+    _write_json(
+        output_dir / "progress.json",
+        {
+            "schema_version": SCHEMA_VERSION,
+            "stage": "gate0_complete",
+            "gate0_status": "PASS" if gate0_pass else "FAIL",
+        },
+    )
 
     if gate0_pass:
+        print("[gamma-fit] Gate 0 passed; fitting temporal innovation gamma", flush=True)
         gammas = _fit_gammas(
             calibration_paths,
             args.layers,
@@ -133,6 +156,15 @@ def main() -> int:
             ridge=args.gamma_ridge,
             rho=args.gamma_rho,
         )
+        parameters["predictor_kind"] = "hybrid_kv_innovation"
+        for layer, gamma in gammas.items():
+            parameters["layers"][layer]["innovation_gamma"] = gamma
+        torch.save(parameters, output_dir / "hybrid_checkpoint.pt")
+        _write_json(
+            output_dir / "progress.json",
+            {"schema_version": SCHEMA_VERSION, "stage": "gamma_fit_complete"},
+        )
+        print("[gamma-fit] checkpoint saved; evaluating Gate 1", flush=True)
         final_rows = _evaluate_paths(
             validation_paths,
             args.layers,
@@ -140,6 +172,7 @@ def main() -> int:
             gammas=gammas,
             requested_unit_size=args.unit_size,
             seed=args.seed,
+            quantile_max_samples=args.quantile_max_samples,
         )
         prompt_rows = prompt_aggregates(final_rows)
         correction_ci = bootstrap_median_ci(
@@ -179,10 +212,6 @@ def main() -> int:
             "gamma_saturation_fraction": gamma_saturation_fraction,
             "attention_sensitive_layer_gate": "NOT_EVALUATED_IN_E1",
         }
-        parameters["predictor_kind"] = "hybrid_kv_innovation"
-        for layer, gamma in gammas.items():
-            parameters["layers"][layer]["innovation_gamma"] = gamma
-
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "git_sha": _git_sha(),
@@ -196,6 +225,14 @@ def main() -> int:
     _write_json(output_dir / "summary.json", summary)
     _write_json(output_dir / "manifest.json", manifest)
     _write_report(output_dir / "report.md", summary, len(calibration_paths), len(validation_paths))
+    _write_json(
+        output_dir / "progress.json",
+        {
+            "schema_version": SCHEMA_VERSION,
+            "stage": "analysis_complete",
+            "status": summary["status"],
+        },
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
 
     if args.require_pass and summary["status"] != "PASS_E1":
@@ -205,7 +242,10 @@ def main() -> int:
 
 def _fit_cross_models(paths: list[Path], layers: str, ridge: float) -> dict[int, CrossKVModel]:
     accumulators: dict[int, CrossKVAccumulator] = {}
-    for path in paths:
+    interval = max(1, len(paths) // 20)
+    for index, path in enumerate(paths, start=1):
+        if index == 1 or index % interval == 0 or index == len(paths):
+            print(f"[cross-fit] shard {index}/{len(paths)}: {path.name}", flush=True)
         for layer, key, value, _ in iter_kv_dump_layers(path, layers=layers):
             accumulator = accumulators.setdefault(
                 layer, CrossKVAccumulator(key.shape[1], key.shape[-1])
@@ -226,7 +266,10 @@ def _fit_gammas(
     rho: float,
 ) -> dict[int, torch.Tensor]:
     accumulators: dict[int, GammaAccumulator] = {}
-    for path in paths:
+    interval = max(1, len(paths) // 20)
+    for index, path in enumerate(paths, start=1):
+        if index == 1 or index % interval == 0 or index == len(paths):
+            print(f"[gamma-fit] shard {index}/{len(paths)}: {path.name}", flush=True)
         for layer, key, value, metadata in iter_kv_dump_layers(path, layers=layers):
             model = models.get(layer)
             if model is None:
@@ -251,11 +294,17 @@ def _evaluate_paths(
     gammas: dict[int, torch.Tensor] | None,
     requested_unit_size: int,
     seed: int,
+    quantile_max_samples: int,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     prompt_groups = _group_paths_by_prompt(paths, layers)
     prompt_ids = sorted(prompt_groups)
     for prompt_index, prompt_id in enumerate(prompt_ids):
+        stage = "Gate 1" if gammas is not None else "Gate 0"
+        print(
+            f"[evaluate] {stage} prompt {prompt_index + 1}/{len(prompt_ids)}: {prompt_id}",
+            flush=True,
+        )
         prompt_paths = prompt_groups[prompt_id]
         donor_prompt_id = prompt_ids[(prompt_index + 1) % len(prompt_ids)]
         donor_paths = prompt_groups[donor_prompt_id]
@@ -300,6 +349,7 @@ def _evaluate_paths(
                     gamma=gamma,
                     shuffled_innovations=shuffled_innovations,
                     shuffle_seed=seed + 1009 * prompt_index + layer,
+                    quantile_max_samples=quantile_max_samples,
                 ):
                     rows.append(
                         {
@@ -398,6 +448,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("gamma-rho must be in (0, 1)")
     if args.bootstrap_resamples <= 0:
         raise ValueError("bootstrap-resamples must be positive")
+    if args.quantile_max_samples <= 0:
+        raise ValueError("quantile-max-samples must be positive")
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:

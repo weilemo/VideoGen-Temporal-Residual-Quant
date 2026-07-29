@@ -16,6 +16,7 @@ CROSS_RIDGE="${CROSS_RIDGE:-1e-4}"
 GAMMA_RIDGE="${GAMMA_RIDGE:-1e-6}"
 GAMMA_RHO="${GAMMA_RHO:-0.95}"
 BOOTSTRAP_RESAMPLES="${BOOTSTRAP_RESAMPLES:-2000}"
+QUANTILE_MAX_SAMPLES="${QUANTILE_MAX_SAMPLES:-262144}"
 SEED="${SEED:-0}"
 REQUIRE_PASS="${REQUIRE_PASS:-0}"
 
@@ -45,6 +46,7 @@ command=(
   --gamma-ridge "${GAMMA_RIDGE}"
   --gamma-rho "${GAMMA_RHO}"
   --bootstrap-resamples "${BOOTSTRAP_RESAMPLES}"
+  --quantile-max-samples "${QUANTILE_MAX_SAMPLES}"
   --seed "${SEED}"
 )
 if [[ "${REQUIRE_PASS}" == "1" ]]; then

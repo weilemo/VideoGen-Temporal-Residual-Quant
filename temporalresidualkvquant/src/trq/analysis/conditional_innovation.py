@@ -9,6 +9,9 @@ import numpy as np
 import torch
 
 
+DEFAULT_QUANTILE_MAX_SAMPLES = 262_144
+
+
 @dataclass(frozen=True)
 class CrossKVModel:
     """Per-head affine map ``V = K W + b``."""
@@ -124,6 +127,7 @@ def evaluate_layer(
     gamma: torch.Tensor | None = None,
     shuffled_innovations: list[torch.Tensor] | None = None,
     shuffle_seed: int = 0,
+    quantile_max_samples: int = DEFAULT_QUANTILE_MAX_SAMPLES,
 ) -> list[dict[str, float | int]]:
     """Return one row per head using only adjacent full units.
 
@@ -132,6 +136,8 @@ def evaluate_layer(
     but the experiment CLI always uses a prompt-disjoint donor.
     """
     _validate_pair(key, value)
+    if quantile_max_samples <= 0:
+        raise ValueError("quantile_max_samples must be positive")
     k_units = full_units(key, unit_size)
     v_units = full_units(value, unit_size)
     if len(k_units) < 2:
@@ -208,12 +214,115 @@ def evaluate_layer(
         row["cross_over_temporal"] = _ratio(accumulators["cross"][head], accumulators["temporal"][head])
         row["oracle_over_cross"] = _ratio(accumulators["oracle"][head], accumulators["cross"][head])
         row["shuffled_over_cross"] = _ratio(accumulators["shuffled"][head], accumulators["cross"][head])
-        for name, chunks in distributions.items():
-            flattened = torch.cat([chunk[:, head].reshape(-1) for chunk in chunks]).float()
-            row[f"{name}_std"] = float(flattened.std(unbiased=False).item())
-            row[f"{name}_p99_abs"] = float(torch.quantile(flattened.abs(), 0.99).item())
+        for distribution_index, (name, chunks) in enumerate(distributions.items()):
+            stats = distribution_stats(
+                chunks,
+                head,
+                quantile=0.99,
+                max_quantile_samples=quantile_max_samples,
+                seed=shuffle_seed + 104_729 * distribution_index + head,
+            )
+            row[f"{name}_std"] = stats["std"]
+            row[f"{name}_p99_abs"] = stats["quantile_abs"]
+            row[f"{name}_p99_samples"] = stats["quantile_samples"]
         rows.append(row)
     return rows
+
+
+def distribution_stats(
+    chunks: Iterable[torch.Tensor],
+    head: int,
+    *,
+    quantile: float,
+    max_quantile_samples: int = DEFAULT_QUANTILE_MAX_SAMPLES,
+    seed: int = 0,
+) -> dict[str, float | int]:
+    """Compute exact standard deviation and a bounded sampled abs quantile.
+
+    The gate metrics remain full-data reductions. Only the diagnostic quantile
+    is sampled, which avoids materializing and sorting a multi-billion-element
+    tensor for each head.
+    """
+    chunk_list = list(chunks)
+    if not chunk_list:
+        raise ValueError("distribution chunks must be non-empty")
+    if not 0 <= quantile <= 1:
+        raise ValueError("quantile must be in [0, 1]")
+    if max_quantile_samples <= 0:
+        raise ValueError("max_quantile_samples must be positive")
+
+    flattened: list[torch.Tensor] = []
+    sizes: list[int] = []
+    count = 0
+    mean = 0.0
+    m2 = 0.0
+    for chunk in chunk_list:
+        if chunk.ndim != 4 or not 0 <= head < chunk.shape[1]:
+            raise ValueError(
+                f"invalid distribution chunk/head: shape={tuple(chunk.shape)}, head={head}"
+            )
+        values = chunk[:, head].reshape(-1).detach().to(device="cpu", dtype=torch.float32)
+        size = int(values.numel())
+        if size == 0:
+            continue
+        chunk_variance, chunk_mean = torch.var_mean(values, correction=0)
+        chunk_mean_value = float(chunk_mean.item())
+        chunk_m2 = float(chunk_variance.item()) * size
+        if count == 0:
+            mean = chunk_mean_value
+            m2 = chunk_m2
+        else:
+            combined = count + size
+            delta = chunk_mean_value - mean
+            m2 += chunk_m2 + delta * delta * count * size / combined
+            mean += delta * size / combined
+        count += size
+        flattened.append(values)
+        sizes.append(size)
+
+    if count == 0:
+        raise ValueError("distribution chunks contain no values")
+
+    sample_total = min(count, int(max_quantile_samples))
+    quotas = _proportional_quotas(sizes, sample_total)
+    samples: list[torch.Tensor] = []
+    for index, (values, quota) in enumerate(zip(flattened, quotas)):
+        if quota <= 0:
+            continue
+        if quota >= values.numel():
+            sample = values
+        else:
+            generator = torch.Generator(device="cpu").manual_seed(
+                int(seed) + 1_000_003 * (index + 1)
+            )
+            indices = torch.randint(values.numel(), (quota,), generator=generator)
+            sample = values[indices]
+        samples.append(sample.abs())
+
+    quantile_values = torch.cat(samples)
+    return {
+        "count": count,
+        "std": float(max(m2 / count, 0.0) ** 0.5),
+        "quantile_abs": float(torch.quantile(quantile_values, quantile).item()),
+        "quantile_samples": int(quantile_values.numel()),
+    }
+
+
+def _proportional_quotas(sizes: list[int], total: int) -> list[int]:
+    if total <= 0 or not sizes or sum(sizes) <= 0:
+        raise ValueError("quota inputs must be positive")
+    population = sum(sizes)
+    numerators = [total * size for size in sizes]
+    quotas = [numerator // population for numerator in numerators]
+    remainder = total - sum(quotas)
+    order = sorted(
+        range(len(sizes)),
+        key=lambda index: numerators[index] % population,
+        reverse=True,
+    )
+    for index in order[:remainder]:
+        quotas[index] += 1
+    return quotas
 
 
 def prompt_aggregates(rows: Iterable[dict[str, Any]]) -> list[dict[str, float | str]]:
