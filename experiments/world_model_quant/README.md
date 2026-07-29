@@ -191,6 +191,35 @@ RUN_ID=b1_moviegen32_20260728 \
 更接近同 prompt、同 seed 的 BF16；它仍是轨迹相似度，不是绝对视频质量。脚本的
 `.done` 标记只证明对应自动阶段完成，不能替代人工 catastrophe/action review。
 
+### B1 匿名人工审阅包
+
+人工审阅使用独立的静态网页。公开目录只包含匿名 A/B 任务和媒体链接；方法、bit、原始
+路径与 A/B 对应关系只写入公开目录上一级的 `private_mapping.json`，不能把整个输出根
+作为网页根目录。MovieGen32 为每个 baseline、prompt 和量化候选分别建立 BF16 对照，
+共 `2 x 32 x 4 = 256` 个 catastrophe 任务；HY holdout 为每个场景和候选建立包含四个
+动作的 A/B group，5 个场景共 20 个 action 任务。
+
+```bash
+python experiments/world_model_quant/prepare_b1_review.py \
+  --causal-manifest /path/to/unified/causal_forcing/manifest.json \
+  --longcat-manifest /path/to/unified/longcat/manifest.json \
+  --hy-root /path/to/hy/action_control_holdout \
+  --output-root results/world_model_quant/review/b1_moviegen32_20260729
+
+cd results/world_model_quant/review/b1_moviegen32_20260729/public
+python -m http.server 8766
+```
+
+网页使用浏览器本地存储自动保存，并导出带 manifest SHA-256 的 JSON。审阅结束后才使用
+私有映射解盲；hash 不一致时脚本拒绝合并：
+
+```bash
+python experiments/world_model_quant/decode_b1_review.py \
+  --review /path/to/b1-review-reviewer01.json \
+  --private-mapping results/world_model_quant/review/b1_moviegen32_20260729/private_mapping.json \
+  --output results/world_model_quant/review/b1_moviegen32_20260729/reviewer01_decoded.csv
+```
+
 同 bit 下，只有当 TRQ 的配对指标优于 naive/RTN，并且没有新增 TRQ-only catastrophe
 时，才认为方法通过。B1 若区间较宽但效应方向未反转，允许进入 B2 以增加统计功效；
 出现 BF16 失败、量化静默回退、不可解码输出或重复 TRQ-only catastrophe 时，只停止
