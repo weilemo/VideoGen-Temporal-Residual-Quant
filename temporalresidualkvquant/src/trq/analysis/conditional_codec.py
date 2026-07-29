@@ -1,0 +1,265 @@
+"""Fixed-bit reconstructed-state simulation for conditional innovation coding."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Any
+
+import torch
+
+from ..real.trq import (
+    _dequantize_asym,
+    _dequantize_sym,
+    _quantize_asym,
+    _quantize_sym,
+    trq_state_nbytes,
+)
+from .conditional_innovation import CrossKVModel, full_units
+
+
+@dataclass
+class _MetricAccumulator:
+    squared_error: float = 0.0
+    target_energy: float = 0.0
+    values: int = 0
+    payload_bytes: int = 0
+
+    def update(
+        self,
+        target: torch.Tensor,
+        reconstruction: torch.Tensor,
+        payload_bytes: int,
+    ) -> dict[str, float | int]:
+        error = target.float() - reconstruction.float()
+        squared_error = float(error.double().square().sum().item())
+        target_energy = float(target.double().square().sum().item())
+        values = int(target.numel())
+        self.squared_error += squared_error
+        self.target_energy += target_energy
+        self.values += values
+        self.payload_bytes += int(payload_bytes)
+        return {
+            "mse": squared_error / max(values, 1),
+            "rel_l2": math.sqrt(squared_error / max(target_energy, 1e-30)),
+            "max_abs": float(error.abs().max().item()),
+            "payload_bytes": int(payload_bytes),
+        }
+
+    def summary(self) -> dict[str, float | int]:
+        return {
+            "squared_error": self.squared_error,
+            "target_energy": self.target_energy,
+            "mse": self.squared_error / max(self.values, 1),
+            "rel_l2": math.sqrt(self.squared_error / max(self.target_energy, 1e-30)),
+            "payload_bytes": self.payload_bytes,
+            "values": self.values,
+        }
+
+
+def simulate_conditional_codec(
+    key: torch.Tensor,
+    value: torch.Tensor,
+    model: CrossKVModel,
+    gamma: torch.Tensor,
+    *,
+    unit_size: int,
+    key_bits: int = 4,
+    value_bits: int = 4,
+    anchor_bits: int = 4,
+    block_size: int = 64,
+    reset_spans: tuple[int, ...] = (2, 4, 8),
+    scale_precision: torch.dtype = torch.bfloat16,
+) -> dict[str, Any]:
+    """Compare direct, temporal, Cross-KV, oracle, and closed-loop codecs.
+
+    K and all decoder-reproducible V predictors use only reconstructed state.
+    The oracle method deliberately uses BF16 K/V history and is reported only
+    as a structural upper bound. Quantized payloads use the same packed
+    asymmetric residual format as TRQ v1.
+    """
+    if key.shape != value.shape or key.ndim != 4:
+        raise ValueError("K/V must have the same BHSD shape")
+    if tuple(gamma.shape) != (key.shape[1], key.shape[-1]):
+        raise ValueError(f"gamma must be [H,D], got {tuple(gamma.shape)}")
+    if not reset_spans or any(int(span) <= 0 for span in reset_spans):
+        raise ValueError("reset spans must be positive")
+
+    k_units = full_units(key, unit_size)
+    v_units = full_units(value, unit_size)
+    if len(k_units) < 2:
+        raise ValueError("closed-loop E2 requires at least two complete units")
+
+    reset_spans = tuple(dict.fromkeys(int(span) for span in reset_spans))
+    method_names = [
+        "direct_v",
+        "temporal",
+        "cross",
+        "oracle_hybrid",
+        "closed_hybrid",
+        "shuffled_hybrid",
+    ]
+    method_names.extend(f"closed_hybrid_reset_{span}" for span in reset_spans)
+    metrics = {name: _MetricAccumulator() for name in method_names}
+    previous_v: dict[str, torch.Tensor] = {}
+    unit_rows: list[dict[str, float | int | str | bool]] = []
+    gamma_view = gamma.float()[None, :, None, :]
+    previous_k_reconstruction: torch.Tensor | None = None
+    key_payload_bytes = 0
+
+    for unit_index, (k_unit, v_unit) in enumerate(zip(k_units, v_units)):
+        if unit_index == 0:
+            k_reconstruction, k_bytes = _quantize_reconstruct(
+                k_unit, anchor_bits, block_size, scale_precision, symmetric=True
+            )
+        else:
+            assert previous_k_reconstruction is not None
+            k_residual = k_unit.float() - previous_k_reconstruction.float()
+            decoded_residual, k_bytes = _quantize_reconstruct(
+                k_residual, key_bits, block_size, scale_precision, symmetric=False
+            )
+            k_reconstruction = (previous_k_reconstruction.float() + decoded_residual).to(key.dtype)
+        key_payload_bytes += k_bytes
+
+        direct_reconstruction, direct_bytes = _quantize_reconstruct(
+            v_unit, value_bits, block_size, scale_precision, symmetric=False
+        )
+        direct_row = metrics["direct_v"].update(v_unit, direct_reconstruction, direct_bytes)
+        unit_rows.append(
+            {"unit": unit_index, "method": "direct_v", "reset": True, **direct_row}
+        )
+
+        if unit_index == 0:
+            anchor_reconstruction, anchor_bytes = _quantize_reconstruct(
+                v_unit, anchor_bits, block_size, scale_precision, symmetric=True
+            )
+            for name in method_names[1:]:
+                previous_v[name] = anchor_reconstruction
+                row = metrics[name].update(v_unit, anchor_reconstruction, anchor_bytes)
+                unit_rows.append({"unit": unit_index, "method": name, "reset": True, **row})
+            previous_k_reconstruction = k_reconstruction
+            continue
+
+        assert previous_k_reconstruction is not None
+        cross_prediction = model.predict(k_reconstruction)
+        previous_cross = model.predict(previous_k_reconstruction)
+        oracle_cross = model.predict(k_unit)
+        oracle_previous_cross = model.predict(k_units[unit_index - 1])
+        shuffled_index = (unit_index + 1) % len(k_units)
+        shuffled_innovation = v_units[shuffled_index].float() - model.predict(
+            k_units[shuffled_index]
+        )
+        predictions: dict[str, torch.Tensor] = {
+            "temporal": previous_v["temporal"].float(),
+            "cross": cross_prediction,
+            "oracle_hybrid": oracle_cross
+            + gamma_view * (v_units[unit_index - 1].float() - oracle_previous_cross),
+            "closed_hybrid": cross_prediction
+            + gamma_view * (previous_v["closed_hybrid"].float() - previous_cross),
+            "shuffled_hybrid": cross_prediction
+            + gamma_view * shuffled_innovation,
+        }
+        for span in reset_spans:
+            name = f"closed_hybrid_reset_{span}"
+            if unit_index % span:
+                predictions[name] = cross_prediction + gamma_view * (
+                    previous_v[name].float() - previous_cross
+                )
+
+        for name in method_names[1:]:
+            is_reset = name.startswith("closed_hybrid_reset_") and name not in predictions
+            if is_reset:
+                reconstruction, payload_bytes = _quantize_reconstruct(
+                    v_unit, anchor_bits, block_size, scale_precision, symmetric=True
+                )
+            else:
+                prediction = predictions[name]
+                residual = v_unit.float() - prediction
+                decoded_residual, payload_bytes = _quantize_reconstruct(
+                    residual, value_bits, block_size, scale_precision, symmetric=False
+                )
+                reconstruction = (prediction + decoded_residual).to(value.dtype)
+            previous_v[name] = reconstruction
+            row = metrics[name].update(v_unit, reconstruction, payload_bytes)
+            unit_rows.append({"unit": unit_index, "method": name, "reset": is_reset, **row})
+
+        previous_k_reconstruction = k_reconstruction
+
+    predictor_bytes = trq_state_nbytes({"weight": model.weight, "bias": model.bias})
+    gamma_bytes = trq_state_nbytes(gamma)
+    summaries: dict[str, dict[str, float | int | bool]] = {}
+    for name, accumulator in metrics.items():
+        summary = accumulator.summary()
+        method_predictor_bytes = 0 if name in {"direct_v", "temporal"} else predictor_bytes
+        if "hybrid" in name:
+            method_predictor_bytes += gamma_bytes
+        summary["key_payload_bytes"] = key_payload_bytes
+        summary["predictor_bytes"] = method_predictor_bytes
+        summary["physical_bytes"] = int(
+            summary["payload_bytes"] + key_payload_bytes + method_predictor_bytes
+        )
+        method_units = [row for row in unit_rows if row["method"] == name]
+        rel_l2_values = [float(row["rel_l2"]) for row in method_units]
+        summary["final_unit_rel_l2"] = rel_l2_values[-1]
+        summary["max_unit_rel_l2"] = max(rel_l2_values)
+        summary["monotonic_increase_fraction"] = _increase_fraction(rel_l2_values)
+        summary["finite"] = all(math.isfinite(value) for value in rel_l2_values)
+        summaries[name] = summary
+
+    return {
+        "complete_units": len(k_units),
+        "ignored_tokens": int(key.shape[2] - len(k_units) * unit_size),
+        "shared_key_codec": "identity temporal residual; reconstructed state",
+        "methods": summaries,
+        "unit_rows": unit_rows,
+    }
+
+
+def _quantize_reconstruct(
+    tensor: torch.Tensor,
+    bits: int,
+    block_size: int,
+    scale_precision: torch.dtype,
+    *,
+    symmetric: bool,
+) -> tuple[torch.Tensor, int]:
+    alignment = math.lcm(block_size, 8 // int(bits))
+    padded_dim = math.ceil(tensor.shape[-1] / alignment) * alignment
+    if symmetric:
+        quantized, scales = _quantize_sym(
+            tensor, bits, block_size, padded_dim, scale_precision
+        )
+        reconstruction = _dequantize_sym(
+            quantized,
+            scales,
+            bits,
+            block_size,
+            tensor.shape[-1],
+            padded_dim,
+            tensor.dtype,
+        )
+        state = {"quantized": quantized, "scales": scales}
+    else:
+        quantized, scales, zero_points = _quantize_asym(
+            tensor, bits, block_size, padded_dim, scale_precision
+        )
+        reconstruction = _dequantize_asym(
+            quantized,
+            scales,
+            zero_points,
+            bits,
+            block_size,
+            tensor.shape[-1],
+            padded_dim,
+            tensor.dtype,
+        )
+        state = {"quantized": quantized, "scales": scales, "zero_points": zero_points}
+    return reconstruction, trq_state_nbytes(state)
+
+
+def _increase_fraction(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    return sum(current > previous for previous, current in zip(values, values[1:])) / (
+        len(values) - 1
+    )

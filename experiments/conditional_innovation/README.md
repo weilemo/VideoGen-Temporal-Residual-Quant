@@ -68,3 +68,51 @@ explicit.
 - `PASS_E1`: the information hypothesis passed. This only authorizes the next
   reconstructed-state fixed-bit experiment; it is not evidence of video or
   system benefit.
+
+## E2 fixed-bit reconstructed-state experiment
+
+E2 consumes a completed `PASS_E1` directory and reuses its frozen Cross-KV and
+gamma parameters. It evaluates packed fixed-bit Direct-V (with the shared K
+codec held fixed), Temporal, Cross, Oracle Hybrid, Closed-loop Hybrid,
+within-prompt shuffled control, and fixed reset-span variants. K and
+Closed-loop V prediction use reconstructed state; the oracle is explicitly
+diagnostic.
+
+```bash
+E1_DIR=/path/to/pass_e1 \
+OUTPUT_DIR="$PWD/results/conditional_innovation/e2_k4v4" \
+LAYERS='8-19' \
+UNIT_SIZE=1560 \
+KEY_BITS=4 VALUE_BITS=4 ANCHOR_BITS=4 BLOCK_SIZE=64 \
+RESET_SPANS='2,4,8' \
+bash scripts/analysis/run_conditional_innovation_e2.sh
+```
+
+Every dump/layer record is written atomically under `shards/`; rerunning the
+same output directory skips completed records. The aggregate report includes
+packed payload, scale/zero-point, predictor, gamma, and K payload bytes.
+
+The current raw dumps do not contain matched BF16 query tensors. Consequently
+E2 can pass its reconstructed-state core but its overall status remains
+`BLOCKED_E2_SUBGATES`. It cannot authorize E3 until attention-output error,
+event recovery, and saturation are measured. Quantization-aware gamma,
+the unconstrained concat-capacity baseline, and event-aware reset also remain
+explicit gaps; fixed reset spans are reported.
+
+## Gate-driven serial queue
+
+The queue can take over an already-running E1. It waits for `analysis.complete`,
+stops on a negative E1 result, launches resumable E2 only on `PASS_E1`, and
+then stops at the attention gate instead of silently starting video jobs:
+
+```bash
+E1_DIR=/path/to/active_e1 \
+E2_OUTPUT_DIR=/path/to/e2_k4v4 \
+LAYERS='8-19' UNIT_SIZE=1560 \
+nohup bash scripts/analysis/run_conditional_innovation_queue.sh \
+  > /tmp/conditional_innovation_queue.log 2>&1 &
+```
+
+The atomic `QUEUE_STATE` JSON records `WAITING_E1`, `RUNNING_E2`, a scientific
+stop, or `WAITING_E2_SUBGATES`. GPU video stages are intentionally not
+started by this CPU queue.
