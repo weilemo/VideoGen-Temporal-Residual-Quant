@@ -3,37 +3,37 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>B1 Anonymous Review</title>
+    <title>B1 匿名审阅 / Anonymous Review</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <header class="topbar">
       <div>
-        <h1>B1 Anonymous Review</h1>
-        <p id="task-meta">Loading manifest...</p>
+        <h1>B1 匿名审阅 / Anonymous Review</h1>
+        <p id="task-meta">正在加载任务 / Loading manifest...</p>
       </div>
       <div class="reviewer-field">
-        <label for="reviewer-id">Reviewer ID</label>
-        <input id="reviewer-id" autocomplete="off" placeholder="required">
+        <label for="reviewer-id">审阅者 ID / Reviewer ID</label>
+        <input id="reviewer-id" autocomplete="off" placeholder="必填 / Required">
       </div>
-      <div class="progress-wrap" aria-label="Review progress">
+      <div class="progress-wrap" aria-label="审阅进度 / Review progress">
         <span id="progress-text">0 / 0</span>
         <progress id="progress" value="0" max="1"></progress>
       </div>
     </header>
 
     <main>
-      <nav class="toolbar" aria-label="Task navigation">
-        <button id="prev" type="button">Previous</button>
-        <button id="next-incomplete" type="button">Next incomplete</button>
-        <select id="task-filter" aria-label="Filter tasks">
-          <option value="all">All tasks</option>
-          <option value="incomplete">Incomplete only</option>
-          <option value="catastrophe">Catastrophe review</option>
-          <option value="action">Action review</option>
+      <nav class="toolbar" aria-label="任务导航 / Task navigation">
+        <button id="prev" type="button">上一项 / Previous</button>
+        <button id="next-incomplete" type="button">下一未完成项 / Next incomplete</button>
+        <select id="task-filter" aria-label="筛选任务 / Filter tasks">
+          <option value="all">全部任务 / All tasks</option>
+          <option value="incomplete">仅未完成 / Incomplete only</option>
+          <option value="catastrophe">质量灾难审阅 / Catastrophe review</option>
+          <option value="action">动作控制审阅 / Action review</option>
         </select>
-        <button id="export" type="button">Export JSON</button>
-        <label class="import-label">Import JSON<input id="import" type="file" accept="application/json"></label>
+        <button id="export" type="button">导出 JSON / Export</button>
+        <label class="import-label">导入 JSON / Import<input id="import" type="file" accept="application/json"></label>
       </nav>
 
       <section class="task-header">
@@ -43,6 +43,7 @@
         </div>
         <p id="prompt"></p>
         <p id="conditioning-note" class="notice" hidden></p>
+        <div id="rubric"></div>
       </section>
 
       <section id="review-root" aria-live="polite"></section>
@@ -50,8 +51,8 @@
     </main>
 
     <footer>
-      <button id="previous-bottom" type="button">Previous</button>
-      <button id="complete-next" class="primary" type="button">Mark complete and next</button>
+      <button id="previous-bottom" type="button">上一项 / Previous</button>
+      <button id="complete-next" class="primary" type="button">标记完成并继续 / Complete and next</button>
     </footer>
     <script src="app.js"></script>
   </body>

@@ -87,6 +87,10 @@ def test_review_package_is_complete_and_public_manifest_is_anonymous(tmp_path):
     assert set(private["tasks"]) == {task["id"] for task in public["tasks"]}
     assert (output / "public" / "index.html").is_file()
     assert all(path.is_symlink() for path in (output / "public" / "media").rglob("*.mp4"))
+    app_source = (output / "public" / "app.js").read_text(encoding="utf-8")
+    assert "身份切换 / Identity switch" in app_source
+    assert "反事实分离 / Counterfactual separation" in app_source
+    assert "判定说明与例子 / Definitions and examples" in app_source
 
 
 def test_review_package_refuses_to_overwrite_existing_package(tmp_path):
