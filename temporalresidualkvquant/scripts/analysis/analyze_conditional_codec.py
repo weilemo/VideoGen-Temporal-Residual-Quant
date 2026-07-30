@@ -8,6 +8,7 @@ import csv
 import hashlib
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -15,7 +16,10 @@ from typing import Any
 
 import torch
 
-from trq.analysis.conditional_codec import simulate_conditional_codec
+from trq.analysis.conditional_codec import (
+    reconstruct_closed_loop_innovations,
+    simulate_conditional_codec,
+)
 from trq.analysis.conditional_innovation import CrossKVModel
 from trq.analysis.kv_dump import iter_kv_dump_layers
 
@@ -63,6 +67,10 @@ def main() -> int:
         weights_only=False,
     )
     reset_spans = tuple(int(value.strip()) for value in args.reset_spans.split(","))
+    prompt_groups = _group_paths_by_prompt(validation_paths)
+    prompt_ids = sorted(prompt_groups)
+    if len(prompt_ids) < 2:
+        raise ValueError("E2 shuffled control requires at least two validation prompts")
 
     output_dir = Path(args.output_dir).expanduser().resolve()
     shard_dir = output_dir / "shards"
@@ -75,6 +83,10 @@ def main() -> int:
             "e1_dir": str(e1_dir),
             "e1_git_sha": manifest.get("git_sha"),
             "validation_dumps": [str(path) for path in validation_paths],
+            "shuffled_control": (
+                "deterministic next-prompt derangement; donor innovations are reconstructed "
+                "with the same closed-loop K/V codec and contain no target-prompt or future-BF16 state"
+            ),
             "config": vars(args),
             "scientific_scope": (
                 "E2 fixed-bit offline reconstructed-state mechanism test; "
@@ -84,55 +96,105 @@ def main() -> int:
     )
 
     total_records = 0
-    for path_index, path in enumerate(validation_paths, start=1):
-        for layer, key, value, metadata in iter_kv_dump_layers(path, layers=args.layers):
-            layer_params = parameters["layers"].get(layer, parameters["layers"].get(str(layer)))
-            if layer_params is None or "innovation_gamma" not in layer_params:
-                raise ValueError(f"E1 parameters lack hybrid predictor for layer {layer}")
-            shard_path = shard_dir / _shard_name(path, layer)
-            if shard_path.exists():
-                total_records += 1
-                continue
-            unit_size = _unit_size(args.unit_size, metadata)
-            model = CrossKVModel(
-                weight=layer_params["cross_weight"],
-                bias=layer_params["cross_bias"],
-            )
-            print(
-                f"[e2] dump {path_index}/{len(validation_paths)} layer {layer}: {path.name}",
-                flush=True,
-            )
-            result = simulate_conditional_codec(
-                key,
-                value,
-                model,
-                layer_params["innovation_gamma"],
-                unit_size=unit_size,
-                key_bits=args.key_bits,
-                value_bits=args.value_bits,
-                anchor_bits=args.anchor_bits,
-                block_size=args.block_size,
-                reset_spans=reset_spans,
-            )
-            payload = {
-                "schema_version": SCHEMA_VERSION,
-                "dump_path": str(path),
-                "layer": layer,
-                "unit_size": unit_size,
-                **result,
-            }
-            _write_json_atomic(shard_path, payload)
-            total_records += 1
-            _write_json(
-                output_dir / "progress.json",
-                {
+    for prompt_index, prompt_id in enumerate(prompt_ids):
+        donor_prompt_id = prompt_ids[(prompt_index + 1) % len(prompt_ids)]
+        donor_layers: dict[int, tuple[list[torch.Tensor], int, str]] = {}
+        for donor_path in prompt_groups[donor_prompt_id]:
+            for donor_layer, donor_key, donor_value, donor_metadata in iter_kv_dump_layers(
+                donor_path, layers=args.layers
+            ):
+                layer_params = parameters["layers"].get(
+                    donor_layer, parameters["layers"].get(str(donor_layer))
+                )
+                if layer_params is None or "innovation_gamma" not in layer_params:
+                    raise ValueError(f"E1 parameters lack hybrid predictor for layer {donor_layer}")
+                donor_unit_size = _unit_size(args.unit_size, donor_metadata)
+                donor_model = CrossKVModel(
+                    weight=layer_params["cross_weight"],
+                    bias=layer_params["cross_bias"],
+                )
+                donor_layers[donor_layer] = (
+                    reconstruct_closed_loop_innovations(
+                        donor_key,
+                        donor_value,
+                        donor_model,
+                        layer_params["innovation_gamma"],
+                        unit_size=donor_unit_size,
+                        key_bits=args.key_bits,
+                        value_bits=args.value_bits,
+                        anchor_bits=args.anchor_bits,
+                        block_size=args.block_size,
+                    ),
+                    donor_unit_size,
+                    str(donor_path),
+                )
+        for path in prompt_groups[prompt_id]:
+            for layer, key, value, metadata in iter_kv_dump_layers(path, layers=args.layers):
+                layer_params = parameters["layers"].get(
+                    layer, parameters["layers"].get(str(layer))
+                )
+                if layer_params is None or "innovation_gamma" not in layer_params:
+                    raise ValueError(f"E1 parameters lack hybrid predictor for layer {layer}")
+                shard_path = shard_dir / _shard_name(path, layer)
+                if shard_path.exists():
+                    total_records += 1
+                    continue
+                unit_size = _unit_size(args.unit_size, metadata)
+                model = CrossKVModel(
+                    weight=layer_params["cross_weight"],
+                    bias=layer_params["cross_bias"],
+                )
+                if layer not in donor_layers:
+                    raise ValueError(
+                        f"shuffled donor prompt {donor_prompt_id} lacks layer {layer}"
+                    )
+                shuffled_innovations, donor_unit_size, donor_path = donor_layers[layer]
+                if donor_unit_size != unit_size:
+                    raise ValueError(
+                        f"shuffled donor unit size {donor_unit_size} differs from {unit_size}"
+                    )
+                print(
+                    f"[e2] prompt {prompt_index + 1}/{len(prompt_ids)} layer {layer}: "
+                    f"{path.name}; donor={donor_prompt_id}",
+                    flush=True,
+                )
+                result = simulate_conditional_codec(
+                    key,
+                    value,
+                    model,
+                    layer_params["innovation_gamma"],
+                    unit_size=unit_size,
+                    key_bits=args.key_bits,
+                    value_bits=args.value_bits,
+                    anchor_bits=args.anchor_bits,
+                    block_size=args.block_size,
+                    reset_spans=reset_spans,
+                    shuffled_innovations=shuffled_innovations,
+                )
+                payload = {
                     "schema_version": SCHEMA_VERSION,
-                    "stage": "codec_shards",
-                    "completed_layer_records": total_records,
-                    "current_dump": str(path),
-                    "current_layer": layer,
-                },
-            )
+                    "dump_path": str(path),
+                    "layer": layer,
+                    "unit_size": unit_size,
+                    "prompt_id": prompt_id,
+                    "shuffled_donor_prompt_id": donor_prompt_id,
+                    "shuffled_donor_path": donor_path,
+                    **result,
+                }
+                _write_json_atomic(shard_path, payload)
+                total_records += 1
+                _write_json(
+                    output_dir / "progress.json",
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "stage": "codec_shards",
+                        "completed_layer_records": total_records,
+                        "current_dump": str(path),
+                        "current_layer": layer,
+                        "current_prompt_id": prompt_id,
+                        "shuffled_donor_prompt_id": donor_prompt_id,
+                    },
+                )
 
     shard_payloads = [_read_json(path) for path in sorted(shard_dir.glob("*.json"))]
     if not shard_payloads:
@@ -287,6 +349,19 @@ def _unit_size(requested: int, metadata: dict[str, Any]) -> int:
 def _shard_name(path: Path, layer: int) -> str:
     digest = hashlib.sha256(f"{path.resolve()}:{layer}".encode("utf-8")).hexdigest()[:16]
     return f"{digest}_layer{layer}.json"
+
+
+def _prompt_id_from_path(path: Path) -> str:
+    return re.sub(r"(?:_layer|\.layer)[_-]?\d+$", "", path.stem, flags=re.IGNORECASE)
+
+
+def _group_paths_by_prompt(paths: list[Path]) -> dict[str, list[Path]]:
+    groups: dict[str, list[Path]] = {}
+    for path in paths:
+        groups.setdefault(_prompt_id_from_path(path), []).append(path)
+    for prompt_paths in groups.values():
+        prompt_paths.sort()
+    return groups
 
 
 def _validate_args(args: argparse.Namespace) -> None:

@@ -70,6 +70,7 @@ def simulate_conditional_codec(
     block_size: int = 64,
     reset_spans: tuple[int, ...] = (2, 4, 8),
     scale_precision: torch.dtype = torch.bfloat16,
+    shuffled_innovations: list[torch.Tensor] | None = None,
 ) -> dict[str, Any]:
     """Compare direct, temporal, Cross-KV, oracle, and closed-loop codecs.
 
@@ -89,6 +90,16 @@ def simulate_conditional_codec(
     v_units = full_units(value, unit_size)
     if len(k_units) < 2:
         raise ValueError("closed-loop E2 requires at least two complete units")
+    if shuffled_innovations is None:
+        raise ValueError("E2 requires reconstructed innovations from a prompt-disjoint donor")
+    if len(shuffled_innovations) < len(k_units) - 1:
+        raise ValueError("shuffled donor has fewer complete units than the evaluated prompt")
+    for donor, expected in zip(shuffled_innovations, v_units[:-1]):
+        if donor.shape != expected.shape:
+            raise ValueError(
+                f"shuffled donor geometry {tuple(donor.shape)} does not match "
+                f"{tuple(expected.shape)}"
+            )
 
     reset_spans = tuple(dict.fromkeys(int(span) for span in reset_spans))
     method_names = [
@@ -145,10 +156,7 @@ def simulate_conditional_codec(
         previous_cross = model.predict(previous_k_reconstruction)
         oracle_cross = model.predict(k_unit)
         oracle_previous_cross = model.predict(k_units[unit_index - 1])
-        shuffled_index = (unit_index + 1) % len(k_units)
-        shuffled_innovation = v_units[shuffled_index].float() - model.predict(
-            k_units[shuffled_index]
-        )
+        shuffled_innovation = shuffled_innovations[unit_index - 1].float()
         predictions: dict[str, torch.Tensor] = {
             "temporal": previous_v["temporal"].float(),
             "cross": cross_prediction,
@@ -213,6 +221,66 @@ def simulate_conditional_codec(
         "methods": summaries,
         "unit_rows": unit_rows,
     }
+
+
+def reconstruct_closed_loop_innovations(
+    key: torch.Tensor,
+    value: torch.Tensor,
+    model: CrossKVModel,
+    gamma: torch.Tensor,
+    *,
+    unit_size: int,
+    key_bits: int = 4,
+    value_bits: int = 4,
+    anchor_bits: int = 4,
+    block_size: int = 64,
+    scale_precision: torch.dtype = torch.bfloat16,
+) -> list[torch.Tensor]:
+    """Reconstruct decoder-visible innovations for a shuffled donor prompt."""
+    if key.shape != value.shape or key.ndim != 4:
+        raise ValueError("K/V must have the same BHSD shape")
+    if tuple(gamma.shape) != (key.shape[1], key.shape[-1]):
+        raise ValueError(f"gamma must be [H,D], got {tuple(gamma.shape)}")
+    k_units = full_units(key, unit_size)
+    v_units = full_units(value, unit_size)
+    if len(k_units) < 2:
+        raise ValueError("shuffled donor requires at least two complete units")
+
+    gamma_view = gamma.float()[None, :, None, :]
+    innovations: list[torch.Tensor] = []
+    previous_k: torch.Tensor | None = None
+    previous_v: torch.Tensor | None = None
+    for unit_index, (k_unit, v_unit) in enumerate(zip(k_units, v_units)):
+        if unit_index == 0:
+            k_reconstruction, _ = _quantize_reconstruct(
+                k_unit, anchor_bits, block_size, scale_precision, symmetric=True
+            )
+            v_reconstruction, _ = _quantize_reconstruct(
+                v_unit, anchor_bits, block_size, scale_precision, symmetric=True
+            )
+        else:
+            assert previous_k is not None and previous_v is not None
+            k_residual = k_unit.float() - previous_k.float()
+            decoded_k_residual, _ = _quantize_reconstruct(
+                k_residual, key_bits, block_size, scale_precision, symmetric=False
+            )
+            k_reconstruction = (previous_k.float() + decoded_k_residual).to(key.dtype)
+            prediction = model.predict(k_reconstruction) + gamma_view * (
+                previous_v.float() - model.predict(previous_k)
+            )
+            decoded_v_residual, _ = _quantize_reconstruct(
+                v_unit.float() - prediction,
+                value_bits,
+                block_size,
+                scale_precision,
+                symmetric=False,
+            )
+            v_reconstruction = (prediction + decoded_v_residual).to(value.dtype)
+        innovation = v_reconstruction.float() - model.predict(k_reconstruction)
+        innovations.append(innovation.to(value.dtype))
+        previous_k = k_reconstruction
+        previous_v = v_reconstruction
+    return innovations
 
 
 def _quantize_reconstruct(

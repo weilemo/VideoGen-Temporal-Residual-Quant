@@ -2,7 +2,10 @@ from unittest import TestCase
 
 import torch
 
-from trq.analysis.conditional_codec import simulate_conditional_codec
+from trq.analysis.conditional_codec import (
+    reconstruct_closed_loop_innovations,
+    simulate_conditional_codec,
+)
 from trq.analysis.conditional_innovation import CrossKVModel
 
 
@@ -22,6 +25,22 @@ class ConditionalCodecTests(TestCase):
             weight=torch.eye(8).expand(2, 8, 8).clone(),
             bias=torch.zeros(2, 8),
         )
+        donor_key = torch.randn(1, 2, 30, 8, generator=generator)
+        donor_value = donor_key + 0.2 * torch.randn(
+            1, 2, 30, 8, generator=generator
+        )
+        donor = reconstruct_closed_loop_innovations(
+            donor_key,
+            donor_value,
+            model,
+            torch.full((2, 8), 0.8),
+            unit_size=6,
+            key_bits=2,
+            value_bits=2,
+            anchor_bits=4,
+            block_size=4,
+            scale_precision=torch.float32,
+        )
 
         result = simulate_conditional_codec(
             key,
@@ -35,6 +54,7 @@ class ConditionalCodecTests(TestCase):
             block_size=4,
             reset_spans=(2, 4),
             scale_precision=torch.float32,
+            shuffled_innovations=donor,
         )
 
         self.assertEqual(result["complete_units"], 5)
@@ -49,6 +69,7 @@ class ConditionalCodecTests(TestCase):
         key = torch.zeros(1, 1, 10, 4)
         value = torch.zeros_like(key)
         model = CrossKVModel(weight=torch.eye(4)[None], bias=torch.zeros(1, 4))
+        donor = [torch.zeros(1, 1, 4, 4)]
         result = simulate_conditional_codec(
             key,
             value,
@@ -58,6 +79,7 @@ class ConditionalCodecTests(TestCase):
             block_size=4,
             reset_spans=(2,),
             scale_precision=torch.float32,
+            shuffled_innovations=donor,
         )
         self.assertEqual(result["complete_units"], 2)
         self.assertEqual(result["ignored_tokens"], 2)
@@ -69,6 +91,21 @@ class ConditionalCodecTests(TestCase):
             bias=torch.zeros(2, 4),
         )
         with self.assertRaisesRegex(ValueError, "gamma"):
+            simulate_conditional_codec(
+                tensor,
+                tensor,
+                model,
+                torch.zeros(1, 4),
+                unit_size=4,
+                block_size=4,
+                reset_spans=(2,),
+                shuffled_innovations=[torch.zeros(1, 2, 4, 4)],
+            )
+
+    def test_codec_requires_prompt_disjoint_reconstructed_donor(self):
+        tensor = torch.zeros(1, 1, 8, 4)
+        model = CrossKVModel(weight=torch.eye(4)[None], bias=torch.zeros(1, 4))
+        with self.assertRaisesRegex(ValueError, "prompt-disjoint donor"):
             simulate_conditional_codec(
                 tensor,
                 tensor,
