@@ -70,7 +70,12 @@ def uncompress_single_cache(cache: torch.Tensor | dict) -> torch.Tensor:
     if not isinstance(cache, dict):
         return cache
 
-    if cache.get("format") in {"trq", "hrq"} or cache.get("method") == "s2pp":
+    if cache.get("method") == "s2pp":
+        from .real.s2pp import s2pp_dequantize_tensor
+
+        output_dtype = cache.get("info", {}).get("output_dtype", torch.bfloat16)
+        return s2pp_dequantize_tensor(cache, output_dtype=output_dtype)
+    if cache.get("format") in {"trq", "hrq"}:
         output_dtype = cache.get("info", {}).get("output_dtype", torch.bfloat16)
         return trq_dequantize_tensor(cache, output_dtype=output_dtype)
 

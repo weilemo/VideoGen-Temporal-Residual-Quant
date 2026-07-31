@@ -435,6 +435,73 @@ def compress_kv_cache(k: torch.Tensor, v: torch.Tensor, quant_type: str, quant_c
             k_mode = "identity" if "identity" in quant_type else "affine_channel"
         if v_mode == "auto":
             v_mode = k_mode
+        cross_modes = {
+            "cross_kv", "hybrid_kv_innovation", "k_to_v", "k2v",
+            "k-to-v", "cross", "cross-kv", "kv_cross",
+        }
+        use_s2pp_cross_codec = quant_type.startswith("s2pp") and str(v_mode) in cross_modes
+        if use_s2pp_cross_codec:
+            from .real.s2pp import s2pp_quantize_tensor
+
+            group_size = _config_value(
+                quant_config,
+                "trq_group_size",
+                ("hrq_group_size", "s2pp_group_size"),
+                getattr(quant_config, "quant_block_size", 16),
+            )
+            anchor_bits = _config_value(
+                quant_config, "trq_anchor_bits", ("hrq_anchor_bits", "s2pp_anchor_bits"), 4
+            )
+            predictor_stride = _config_value(
+                quant_config,
+                "trq_predictor_stride",
+                ("hrq_predictor_stride", "s2pp_predictor_stride"),
+                1560,
+            )
+            scale_precision = _config_value(
+                quant_config,
+                "trq_scale_precision",
+                ("hrq_scale_precision", "s2pp_scale_precision"),
+                torch.bfloat16,
+            )
+            residual_quant_mode = _config_value(
+                quant_config,
+                "trq_residual_quant_mode",
+                ("hrq_residual_quant_mode", "s2pp_residual_quant_mode"),
+                "asym_zero_point",
+            )
+            v_params_path = _resolve_trq_params_path(quant_config, str(v_mode), "V")
+            k_quant = s2pp_quantize_tensor(
+                k,
+                num_bits=k_bits,
+                block_size=group_size,
+                anchor_bits=anchor_bits,
+                predictor_stride=predictor_stride,
+                mode="identity",
+                scale_precision=scale_precision,
+                residual_quant_mode=residual_quant_mode,
+                layer_idx=layer_idx,
+                parameter_role="K",
+            )
+            v_quant = s2pp_quantize_tensor(
+                v,
+                num_bits=v_bits,
+                block_size=group_size,
+                anchor_bits=anchor_bits,
+                predictor_stride=predictor_stride,
+                affine_path=v_params_path,
+                mode="cross_kv",
+                scale_precision=scale_precision,
+                residual_quant_mode=residual_quant_mode,
+                source_state=k_quant,
+                layer_idx=layer_idx,
+                parameter_role="V",
+            )
+            # K and V live in separate ChunkedKVCache objects. Persist the
+            # shared packed K object so V can decode without an external cache
+            # pairing API; tensor storage remains shared in-process.
+            v_quant["cross_source_state"] = k_quant
+            return k_quant, v_quant
         k_mode = normalize_trq_predictor_mode(k_mode)
         v_mode = normalize_trq_predictor_mode(v_mode)
         k_params = _get_layer_predictor_params(quant_config, k_mode, layer_idx, "K", head_ids)

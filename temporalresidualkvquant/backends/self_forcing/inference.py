@@ -56,8 +56,11 @@ parser.add_argument("--num_prq_stages", type=int, default=1, help="Number of PRQ
 parser.add_argument("--trq_group_size", "--hrq_group_size", dest="trq_group_size", type=int, default=64, help="Group size for TRQ")
 parser.add_argument("--trq_anchor_bits", "--hrq_anchor_bits", dest="trq_anchor_bits", type=int, default=4, help="Anchor bit width for TRQ")
 parser.add_argument("--trq_predictor_stride", "--hrq_predictor_stride", dest="trq_predictor_stride", type=int, default=1560, help="Predictor stride for TRQ")
-parser.add_argument("--trq_predictor_mode", "--hrq_predictor_mode", dest="trq_predictor_mode", type=str, default="identity", choices=["identity", "affine_channel", "affine"], help="Stable TRQ predictor")
+parser.add_argument("--trq_predictor_mode", "--hrq_predictor_mode", dest="trq_predictor_mode", type=str, default="identity", choices=["identity", "affine_channel", "affine"], help="Default TRQ predictor")
+parser.add_argument("--trq_k_predictor_mode", type=str, default="", help="Optional K-specific predictor override")
+parser.add_argument("--trq_v_predictor_mode", type=str, default="", choices=["", "identity", "affine_channel", "affine", "cross_kv", "hybrid_kv_innovation"], help="Optional V-specific predictor override; cross/hybrid requires s2pp quant_type")
 parser.add_argument("--trq_predictor_params_path", "--hrq_predictor_params_path", dest="trq_predictor_params_path", type=str, default="", help="Path to fitted affine predictor params (.pt or .npz)")
+parser.add_argument("--trq_v_predictor_params_path", type=str, default="", help="Optional V-specific predictor params (.npz)")
 parser.add_argument("--trq_scale_precision", "--hrq_scale_precision", dest="trq_scale_precision", type=str, default="bf16", help="Scale precision for TRQ")
 parser.add_argument("--trq_residual_quant_mode", "--hrq_residual_quant_mode", dest="trq_residual_quant_mode", type=str, default="asym_zero_point", help="Residual quantization mode for TRQ")
 parser.add_argument("--trq_k_bits", type=int, default=0, help="Optional K residual bit override")
@@ -119,7 +122,10 @@ config.quant_config = {
     "trq_anchor_bits": args.trq_anchor_bits,
     "trq_predictor_stride": args.trq_predictor_stride,
     "trq_predictor_mode": args.trq_predictor_mode,
+    "trq_k_predictor_mode": args.trq_k_predictor_mode or None,
+    "trq_v_predictor_mode": args.trq_v_predictor_mode or None,
     "trq_predictor_params_path": args.trq_predictor_params_path,
+    "trq_v_predictor_params_path": args.trq_v_predictor_params_path or None,
     "trq_scale_precision": args.trq_scale_precision,
     "trq_residual_quant_mode": args.trq_residual_quant_mode,
     "trq_k_bits": args.trq_k_bits,

@@ -283,6 +283,149 @@ def reconstruct_closed_loop_innovations(
     return innovations
 
 
+def codec_gamma_statistics(
+    key: torch.Tensor,
+    value: torch.Tensor,
+    model: CrossKVModel,
+    seed_gamma: torch.Tensor,
+    *,
+    unit_size: int,
+    key_bits: int = 4,
+    value_bits: int = 4,
+    anchor_bits: int = 4,
+    block_size: int = 64,
+    scale_precision: torch.dtype = torch.bfloat16,
+    diagnostics: dict[str, Any] | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, int]:
+    """Accumulate decoder-visible gamma regression statistics.
+
+    The regressor is the previous reconstructed innovation and the target is
+    the current BF16 innovation relative to reconstructed K. The seed gamma is
+    used only to create the closed-loop calibration trajectory.
+    """
+    if key.shape != value.shape or key.ndim != 4:
+        raise ValueError("K/V must have the same BHSD shape")
+    if tuple(seed_gamma.shape) != (key.shape[1], key.shape[-1]):
+        raise ValueError(f"seed gamma must be [H,D], got {tuple(seed_gamma.shape)}")
+    k_units = full_units(key, unit_size)
+    v_units = full_units(value, unit_size)
+    if len(k_units) < 2:
+        raise ValueError("codec gamma calibration requires at least two complete units")
+
+    numerator = torch.zeros_like(seed_gamma, dtype=torch.float64)
+    denominator = torch.zeros_like(seed_gamma, dtype=torch.float64)
+    observations = 0
+    gamma_view = seed_gamma.float()[None, :, None, :]
+    previous_k: torch.Tensor | None = None
+    previous_v: torch.Tensor | None = None
+    for unit_index, (k_unit, v_unit) in enumerate(zip(k_units, v_units)):
+        if unit_index == 0:
+            _update_quantizer_diagnostics(
+                diagnostics, k_unit, anchor_bits, block_size, symmetric=True
+            )
+            k_reconstruction, _ = _quantize_reconstruct(
+                k_unit, anchor_bits, block_size, scale_precision, symmetric=True
+            )
+            _update_quantizer_diagnostics(
+                diagnostics, v_unit, anchor_bits, block_size, symmetric=True
+            )
+            v_reconstruction, _ = _quantize_reconstruct(
+                v_unit, anchor_bits, block_size, scale_precision, symmetric=True
+            )
+        else:
+            assert previous_k is not None and previous_v is not None
+            k_residual = k_unit.float() - previous_k.float()
+            _update_quantizer_diagnostics(
+                diagnostics, k_residual, key_bits, block_size, symmetric=False
+            )
+            decoded_k_residual, _ = _quantize_reconstruct(
+                k_residual,
+                key_bits,
+                block_size,
+                scale_precision,
+                symmetric=False,
+            )
+            k_reconstruction = (previous_k.float() + decoded_k_residual).to(key.dtype)
+            previous_innovation = previous_v.float() - model.predict(previous_k)
+            target_innovation = v_unit.float() - model.predict(k_reconstruction)
+            numerator += (previous_innovation.double() * target_innovation.double()).sum(
+                dim=(0, 2)
+            )
+            denominator += previous_innovation.double().square().sum(dim=(0, 2))
+            observations += int(previous_innovation.shape[0] * previous_innovation.shape[2])
+            prediction = model.predict(k_reconstruction) + gamma_view * previous_innovation
+            v_residual = v_unit.float() - prediction
+            _update_quantizer_diagnostics(
+                diagnostics, v_residual, value_bits, block_size, symmetric=False
+            )
+            decoded_v_residual, _ = _quantize_reconstruct(
+                v_residual,
+                value_bits,
+                block_size,
+                scale_precision,
+                symmetric=False,
+            )
+            v_reconstruction = (prediction + decoded_v_residual).to(value.dtype)
+            if diagnostics is not None:
+                previous_true = v_units[unit_index - 1].float()
+                shock = torch.linalg.vector_norm(v_unit.float() - previous_true) / torch.linalg.vector_norm(
+                    previous_true
+                ).clamp_min(1e-12)
+                error = torch.linalg.vector_norm(v_unit.float() - v_reconstruction.float()) / torch.linalg.vector_norm(
+                    v_unit.float()
+                ).clamp_min(1e-12)
+                diagnostics.setdefault("event_rows", []).append(
+                    {
+                        "unit": unit_index,
+                        "shock_rel_l2": float(shock.item()),
+                        "closed_rel_l2": float(error.item()),
+                    }
+                )
+        previous_k = k_reconstruction
+        previous_v = v_reconstruction
+    return numerator, denominator, observations
+
+
+def _update_quantizer_diagnostics(
+    diagnostics: dict[str, Any] | None,
+    tensor: torch.Tensor,
+    bits: int,
+    block_size: int,
+    *,
+    symmetric: bool,
+) -> None:
+    if diagnostics is None:
+        return
+    work = tensor.float()
+    diagnostics["values"] = int(diagnostics.get("values", 0)) + int(work.numel())
+    diagnostics["nonfinite"] = int(diagnostics.get("nonfinite", 0)) + int(
+        (~torch.isfinite(work)).sum().item()
+    )
+    padded = math.ceil(work.shape[-1] / block_size) * block_size
+    if padded != work.shape[-1]:
+        work = torch.nn.functional.pad(work, (0, padded - work.shape[-1]))
+    blocks = work.reshape(*work.shape[:-1], padded // block_size, block_size)
+    levels = (1 << int(bits)) - 1
+    if symmetric:
+        qmax = (1 << (int(bits) - 1)) - 1
+        scale = blocks.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12) / max(qmax, 1)
+        codes = torch.round(blocks / scale)
+        low, high = -qmax, qmax
+    else:
+        minimum = blocks.amin(dim=-1, keepdim=True)
+        maximum = blocks.amax(dim=-1, keepdim=True)
+        scale = ((maximum - minimum) / levels).clamp_min(1e-12)
+        zero = torch.round(-minimum / scale).clamp(0, levels)
+        codes = torch.round(blocks / scale + zero)
+        low, high = 0, levels
+    diagnostics["overflow"] = int(diagnostics.get("overflow", 0)) + int(
+        ((codes < low) | (codes > high)).sum().item()
+    )
+    diagnostics["endpoint"] = int(diagnostics.get("endpoint", 0)) + int(
+        ((codes <= low) | (codes >= high)).sum().item()
+    )
+
+
 def _quantize_reconstruct(
     tensor: torch.Tensor,
     bits: int,

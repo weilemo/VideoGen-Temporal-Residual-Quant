@@ -68,6 +68,33 @@ class TRQIntegrationTests(TestCase):
         self.assertEqual(v_cache["predictor"]["kind"], "affine_channel")
         self.assertEqual(k_cache["anchor_bits"], 8)
 
+    def test_s2pp_hybrid_v_uses_reconstructed_k_source(self):
+        key = torch.randn(1, 2, 6, 4)
+        value = key + 0.1 * torch.randn_like(key)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "hybrid.npz"
+            np.savez(
+                path,
+                predictor_kind=np.asarray("hybrid_kv_innovation"),
+                cross_weight=np.stack([np.eye(4, dtype=np.float32)] * 2),
+                cross_bias=np.zeros((2, 4), dtype=np.float32),
+                innovation_gamma=np.full((2, 4), 0.5, dtype=np.float32),
+                predictor_stride=np.asarray(2, dtype=np.int64),
+            )
+            cfg = self._config("s2pp-int4")
+            cfg.trq_v_predictor_mode = "hybrid_kv_innovation"
+            cfg.trq_v_predictor_params_path = str(path)
+            fn = get_quantize_fn(cfg.quant_type, cfg)
+            k_cache, v_cache = compress_kv_cache(
+                key, value, cfg.quant_type, cfg, fn, layer_idx=0
+            )
+
+            self.assertEqual(uncompress_single_cache(k_cache).shape, key.shape)
+            self.assertEqual(uncompress_single_cache(v_cache).shape, value.shape)
+
+        self.assertEqual(v_cache["predictor_kind"], "hybrid_kv_innovation")
+        self.assertIn("cross_source_state", v_cache)
+
     def test_k_and_v_residual_bits_can_differ(self):
         cfg = self._config()
         cfg.trq_k_bits = 4

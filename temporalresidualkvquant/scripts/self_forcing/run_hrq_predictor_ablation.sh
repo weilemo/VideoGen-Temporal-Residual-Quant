@@ -97,7 +97,7 @@ common_args=(
   --local_attn_size "${local_attn_size}"
   --use_ema
   --save_with_index
-  --quant_type "trq-int${trq_bits}"
+  --quant_type "${TRQ_QUANT_TYPE:-trq-int${trq_bits}}"
   --quant_block_size "${block_size}"
   --trq_group_size "${trq_group_size}"
   --trq_anchor_bits "${trq_anchor_bits}"
@@ -137,7 +137,14 @@ run_predictor() {
   echo "Runtime: seed=${seed} frames=${num_output_frames} local_attn=${local_attn_size} headwise=${headwise_mode}"
   echo "Schedule: first=${trq_first_quant_frame} interval=${trq_quant_interval_frames} mode=${trq_quant_schedule} gradual=${trq_gradual_frames} protected_sink=${trq_protected_sink_frames} attention_sink=${attention_sink_frames} roles=${trq_cache_roles} layers=${trq_quantized_layers}"
 
-  if [ "${mode}" != "identity" ]; then
+  if [[ "${mode}" = "cross_kv" || "${mode}" = "hybrid_kv_innovation" ]]; then
+    params_path="${TRQ_V_PREDICTOR_PARAMS_PATH:?Set TRQ_V_PREDICTOR_PARAMS_PATH for ${mode}}"
+    if [ ! -f "${params_path}" ]; then
+      echo "ERROR: Conditional predictor params not found: ${params_path}" >&2
+      return 1
+    fi
+    echo "Params: ${params_path}"
+  elif [ "${mode}" != "identity" ]; then
     params_path="${predictor_params_dir}/${mode}_self_forcing_dmd.pt"
     if [ ! -f "${params_path}" ]; then
       echo "ERROR: Predictor params not found: ${params_path}"
@@ -149,10 +156,19 @@ run_predictor() {
 
   mkdir -p "${out_dir}"
 
+  predictor_args=(--trq_predictor_mode "${mode}")
+  if [[ "${mode}" = "cross_kv" || "${mode}" = "hybrid_kv_innovation" ]]; then
+    predictor_args=(
+      --trq_predictor_mode identity
+      --trq_k_predictor_mode identity
+      --trq_v_predictor_mode "${mode}"
+      --trq_v_predictor_params_path "${params_path}"
+    )
+  fi
   torchrun --nproc_per_node=1 --standalone "${self_forcing_root}/inference.py" \
     "${common_args[@]}" \
     --output_folder "${out_dir}" \
-    --trq_predictor_mode "${mode}" \
+    "${predictor_args[@]}" \
     2>&1 | tee "${log_file}"
 
   echo "Done: ${mode} → ${out_dir}"
@@ -167,7 +183,11 @@ if [ "${run_mode}" = "all" ] || [ "${run_mode}" = "affine_channel" ]; then
   run_predictor "affine_channel"
 fi
 
-if [ "${run_mode}" != "all" ] && [ "${run_mode}" != "identity" ] && [ "${run_mode}" != "affine_channel" ]; then
+if [ "${run_mode}" = "cross_kv" ] || [ "${run_mode}" = "hybrid_kv_innovation" ]; then
+  run_predictor "${run_mode}"
+fi
+
+if [ "${run_mode}" != "all" ] && [ "${run_mode}" != "identity" ] && [ "${run_mode}" != "affine_channel" ] && [ "${run_mode}" != "cross_kv" ] && [ "${run_mode}" != "hybrid_kv_innovation" ]; then
   echo "ERROR: Unsupported stable TRQ predictor: ${run_mode}" >&2
   echo "       RoPE, tiny_mlp, Cross-KV, AR2, and error-feedback remain experimental." >&2
   exit 2
