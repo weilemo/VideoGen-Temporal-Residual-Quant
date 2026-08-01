@@ -321,13 +321,23 @@ def codec_gamma_statistics(
     for unit_index, (k_unit, v_unit) in enumerate(zip(k_units, v_units)):
         if unit_index == 0:
             _update_quantizer_diagnostics(
-                diagnostics, k_unit, anchor_bits, block_size, symmetric=True
+                diagnostics,
+                k_unit,
+                anchor_bits,
+                block_size,
+                scale_precision,
+                symmetric=True,
             )
             k_reconstruction, _ = _quantize_reconstruct(
                 k_unit, anchor_bits, block_size, scale_precision, symmetric=True
             )
             _update_quantizer_diagnostics(
-                diagnostics, v_unit, anchor_bits, block_size, symmetric=True
+                diagnostics,
+                v_unit,
+                anchor_bits,
+                block_size,
+                scale_precision,
+                symmetric=True,
             )
             v_reconstruction, _ = _quantize_reconstruct(
                 v_unit, anchor_bits, block_size, scale_precision, symmetric=True
@@ -336,7 +346,12 @@ def codec_gamma_statistics(
             assert previous_k is not None and previous_v is not None
             k_residual = k_unit.float() - previous_k.float()
             _update_quantizer_diagnostics(
-                diagnostics, k_residual, key_bits, block_size, symmetric=False
+                diagnostics,
+                k_residual,
+                key_bits,
+                block_size,
+                scale_precision,
+                symmetric=False,
             )
             decoded_k_residual, _ = _quantize_reconstruct(
                 k_residual,
@@ -356,7 +371,12 @@ def codec_gamma_statistics(
             prediction = model.predict(k_reconstruction) + gamma_view * previous_innovation
             v_residual = v_unit.float() - prediction
             _update_quantizer_diagnostics(
-                diagnostics, v_residual, value_bits, block_size, symmetric=False
+                diagnostics,
+                v_residual,
+                value_bits,
+                block_size,
+                scale_precision,
+                symmetric=False,
             )
             decoded_v_residual, _ = _quantize_reconstruct(
                 v_residual,
@@ -391,6 +411,7 @@ def _update_quantizer_diagnostics(
     tensor: torch.Tensor,
     bits: int,
     block_size: int,
+    scale_precision: torch.dtype,
     *,
     symmetric: bool,
 ) -> None:
@@ -408,13 +429,19 @@ def _update_quantizer_diagnostics(
     levels = (1 << int(bits)) - 1
     if symmetric:
         qmax = (1 << (int(bits) - 1)) - 1
-        scale = blocks.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12) / max(qmax, 1)
+        scale = (
+            blocks.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12)
+            / max(qmax, 1)
+        ).to(scale_precision).float()
         codes = torch.round(blocks / scale)
         low, high = -qmax, qmax
     else:
-        minimum = blocks.amin(dim=-1, keepdim=True)
-        maximum = blocks.amax(dim=-1, keepdim=True)
-        scale = ((maximum - minimum) / levels).clamp_min(1e-12)
+        zero = torch.zeros((), dtype=blocks.dtype, device=blocks.device)
+        minimum = torch.minimum(blocks.amin(dim=-1, keepdim=True), zero)
+        maximum = torch.maximum(blocks.amax(dim=-1, keepdim=True), zero)
+        scale = (((maximum - minimum).clamp_min(1e-12)) / levels).to(
+            scale_precision
+        ).float()
         zero = torch.round(-minimum / scale).clamp(0, levels)
         codes = torch.round(blocks / scale + zero)
         low, high = 0, levels
