@@ -407,4 +407,17 @@ async function init() {
   render();
 }
 
-init().catch((error) => { byId("review-root").textContent = error.message; });
+function renderStartupError(error) {
+  const localFile = window.location.protocol === "file:";
+  const title = localFile ? "此源文件不能直接打开" : "审阅包未完整加载";
+  const detail = localFile
+    ? "该目录只包含界面源码，没有 review_manifest.json 和视频。请从生成后的 public 目录启动 HTTP 服务。"
+    : `请确认当前 public 目录包含 review_manifest.json、media/ 和页面文件。错误：${error.message}`;
+  byId("review-root").innerHTML = `<section class="startup-error" role="alert">
+    <h2>${title}</h2>
+    <p>${detail}</p>
+    <code>cd /path/to/generated/review/public<br>python -m http.server 8766</code>
+  </section>`;
+}
+
+init().catch(renderStartupError);

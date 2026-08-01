@@ -50,6 +50,10 @@ video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #101416; 
 .pair-fields { display: grid; grid-template-columns: 1fr; gap: 7px; background: #f3f8f6; }
 .is-hidden { display: none !important; }
 .validation { min-height: 24px; color: #9d2f25; font-weight: 650; }
+.startup-error { max-width: 720px; margin-top: 24px; border: 1px solid #d4b35f; border-radius: 7px; padding: 18px; background: #fff8e6; }
+.startup-error h2 { margin: 0 0 8px; font-size: 18px; }
+.startup-error p { line-height: 1.6; }
+.startup-error code { display: block; overflow-x: auto; border-radius: 5px; padding: 10px; background: #273238; color: #f7f9fa; }
 footer { position: fixed; inset: auto 0 0; z-index: 12; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 24px; border-top: 1px solid #c3ccd0; background: rgba(250, 251, 251, .98); color: #536168; font-size: 12px; }
 .footer-actions { display: flex; gap: 8px; }
 button.primary { border-color: #176b57; background: #176b57; color: #fff; font-weight: 700; }
