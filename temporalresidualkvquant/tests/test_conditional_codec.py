@@ -3,6 +3,7 @@ from unittest import TestCase
 import torch
 
 from trq.analysis.conditional_codec import (
+    _update_quantizer_diagnostics,
     reconstruct_closed_loop_innovations,
     simulate_conditional_codec,
 )
@@ -10,6 +11,24 @@ from trq.analysis.conditional_innovation import CrossKVModel
 
 
 class ConditionalCodecTests(TestCase):
+    def test_s2pp_ranges_do_not_require_preclamp_overflow(self):
+        tensor = torch.tensor(
+            [[[[-1.0, -0.91, -0.2, 0.13], [0.0, 0.07, 0.5, 1.05]]]],
+            dtype=torch.float32,
+        )
+        for symmetric in (True, False):
+            with self.subTest(symmetric=symmetric):
+                diagnostics = {}
+                _update_quantizer_diagnostics(
+                    diagnostics,
+                    tensor,
+                    bits=4,
+                    block_size=4,
+                    scale_precision=torch.bfloat16,
+                    symmetric=symmetric,
+                )
+                self.assertEqual(diagnostics["overflow"], 0)
+
     def test_closed_loop_codec_reports_fixed_bit_baselines(self):
         generator = torch.Generator().manual_seed(17)
         key = torch.randn(1, 2, 30, 8, generator=generator)

@@ -8,13 +8,15 @@ from typing import Any
 
 import torch
 
-from ..real.trq import (
-    _dequantize_asym,
-    _dequantize_sym,
-    _quantize_asym,
-    _quantize_sym,
-    trq_state_nbytes,
+from ..real.s2pp import (
+    _asymmetric_scale_and_zero_point,
+    _dequantize_blockwise,
+    _dequantize_blockwise_asymmetric,
+    _quantize_blockwise,
+    _quantize_blockwise_asymmetric,
+    _symmetric_scales,
 )
+from ..real.trq import trq_state_nbytes
 from .conditional_innovation import CrossKVModel, full_units
 
 
@@ -327,6 +329,7 @@ def codec_gamma_statistics(
                 block_size,
                 scale_precision,
                 symmetric=True,
+                role="K_anchor",
             )
             k_reconstruction, _ = _quantize_reconstruct(
                 k_unit, anchor_bits, block_size, scale_precision, symmetric=True
@@ -338,6 +341,7 @@ def codec_gamma_statistics(
                 block_size,
                 scale_precision,
                 symmetric=True,
+                role="V_anchor",
             )
             v_reconstruction, _ = _quantize_reconstruct(
                 v_unit, anchor_bits, block_size, scale_precision, symmetric=True
@@ -352,6 +356,7 @@ def codec_gamma_statistics(
                 block_size,
                 scale_precision,
                 symmetric=False,
+                role="K_residual",
             )
             decoded_k_residual, _ = _quantize_reconstruct(
                 k_residual,
@@ -377,6 +382,7 @@ def codec_gamma_statistics(
                 block_size,
                 scale_precision,
                 symmetric=False,
+                role="V_residual",
             )
             decoded_v_residual, _ = _quantize_reconstruct(
                 v_residual,
@@ -414,6 +420,7 @@ def _update_quantizer_diagnostics(
     scale_precision: torch.dtype,
     *,
     symmetric: bool,
+    role: str | None = None,
 ) -> None:
     if diagnostics is None:
         return
@@ -429,28 +436,50 @@ def _update_quantizer_diagnostics(
     levels = (1 << int(bits)) - 1
     if symmetric:
         qmax = (1 << (int(bits) - 1)) - 1
-        scale = (
-            blocks.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12)
-            / max(qmax, 1)
-        ).to(scale_precision).float()
+        scale = _symmetric_scales(blocks, qmax, scale_precision).float()
         codes = torch.round(blocks / scale)
         low, high = -qmax, qmax
     else:
-        zero = torch.zeros((), dtype=blocks.dtype, device=blocks.device)
-        minimum = torch.minimum(blocks.amin(dim=-1, keepdim=True), zero)
-        maximum = torch.maximum(blocks.amax(dim=-1, keepdim=True), zero)
-        scale = (((maximum - minimum).clamp_min(1e-12)) / levels).to(
-            scale_precision
-        ).float()
-        zero = torch.round(-minimum / scale).clamp(0, levels)
+        scale, zero = _asymmetric_scale_and_zero_point(
+            blocks, 0, levels, scale_precision
+        )
+        scale = scale.float()
+        zero = zero.float()
         codes = torch.round(blocks / scale + zero)
         low, high = 0, levels
-    diagnostics["overflow"] = int(diagnostics.get("overflow", 0)) + int(
-        ((codes < low) | (codes > high)).sum().item()
+    overflow_mask = (codes < low) | (codes > high)
+    endpoint_mask = (codes <= low) | (codes >= high)
+    excess = torch.maximum((low - codes).clamp_min(0), (codes - high).clamp_min(0))
+    overflow = int(overflow_mask.sum().item())
+    endpoint = int(endpoint_mask.sum().item())
+    excess_sum = float(excess.sum().item())
+    excess_max = float(excess.max().item())
+    diagnostics["overflow"] = int(diagnostics.get("overflow", 0)) + overflow
+    diagnostics["endpoint"] = int(diagnostics.get("endpoint", 0)) + endpoint
+    diagnostics["overflow_code_excess_sum"] = float(
+        diagnostics.get("overflow_code_excess_sum", 0.0)
+    ) + excess_sum
+    diagnostics["max_code_excess"] = max(
+        float(diagnostics.get("max_code_excess", 0.0)), excess_max
     )
-    diagnostics["endpoint"] = int(diagnostics.get("endpoint", 0)) + int(
-        ((codes <= low) | (codes >= high)).sum().item()
-    )
+    if role is not None:
+        role_stats = diagnostics.setdefault("by_role", {}).setdefault(
+            role,
+            {
+                "values": 0,
+                "nonfinite": 0,
+                "overflow": 0,
+                "endpoint": 0,
+                "overflow_code_excess_sum": 0.0,
+                "max_code_excess": 0.0,
+            },
+        )
+        role_stats["values"] += int(tensor.numel())
+        role_stats["nonfinite"] += int((~torch.isfinite(tensor.float())).sum().item())
+        role_stats["overflow"] += overflow
+        role_stats["endpoint"] += endpoint
+        role_stats["overflow_code_excess_sum"] += excess_sum
+        role_stats["max_code_excess"] = max(role_stats["max_code_excess"], excess_max)
 
 
 def _quantize_reconstruct(
@@ -461,34 +490,34 @@ def _quantize_reconstruct(
     *,
     symmetric: bool,
 ) -> tuple[torch.Tensor, int]:
-    alignment = math.lcm(block_size, 8 // int(bits))
-    padded_dim = math.ceil(tensor.shape[-1] / alignment) * alignment
-    if symmetric:
-        quantized, scales = _quantize_sym(
-            tensor, bits, block_size, padded_dim, scale_precision
+    if tensor.shape[-1] % block_size != 0:
+        raise ValueError(
+            f"S2++ block_size={block_size} must divide head_dim={tensor.shape[-1]}"
         )
-        reconstruction = _dequantize_sym(
+    if symmetric:
+        quantized, scales = _quantize_blockwise(
+            tensor, bits, block_size, scale_precision
+        )
+        reconstruction = _dequantize_blockwise(
             quantized,
             scales,
             bits,
             block_size,
             tensor.shape[-1],
-            padded_dim,
             tensor.dtype,
         )
         state = {"quantized": quantized, "scales": scales}
     else:
-        quantized, scales, zero_points = _quantize_asym(
-            tensor, bits, block_size, padded_dim, scale_precision
+        quantized, scales, zero_points = _quantize_blockwise_asymmetric(
+            tensor, bits, block_size, scale_precision
         )
-        reconstruction = _dequantize_asym(
+        reconstruction = _dequantize_blockwise_asymmetric(
             quantized,
             scales,
             zero_points,
             bits,
             block_size,
             tensor.shape[-1],
-            padded_dim,
             tensor.dtype,
         )
         state = {"quantized": quantized, "scales": scales, "zero_points": zero_points}

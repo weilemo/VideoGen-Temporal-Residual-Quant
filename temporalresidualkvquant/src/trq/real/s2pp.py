@@ -950,8 +950,7 @@ def _quantize_blockwise(
     work = x.float()
     qmax = (1 << (bits - 1)) - 1
     grouped = work.reshape(*work.shape[:-1], work.shape[-1] // block_size, block_size)
-    max_abs = grouped.abs().amax(dim=-1, keepdim=True)
-    scales = (max_abs.clamp_min(1e-12) / qmax).to(dtype=scale_precision)
+    scales = _symmetric_scales(grouped, qmax, scale_precision)
     q = torch.round(grouped / scales.float()).clamp(-qmax, qmax).to(torch.int16)
     q = q.reshape(*work.shape)
 
@@ -977,11 +976,9 @@ def _quantize_blockwise_asymmetric(
     # Integer zero-points can represent a purely positive/negative range only
     # when zero belongs to that range.  Without this, clamping the zero-point
     # makes same-sign (and especially constant) groups reconstruct near zero.
-    zeros = torch.zeros((), device=grouped.device, dtype=grouped.dtype)
-    x_min = torch.minimum(grouped.amin(dim=-1, keepdim=True), zeros)
-    x_max = torch.maximum(grouped.amax(dim=-1, keepdim=True), zeros)
-    scales = ((x_max - x_min).clamp_min(1e-12) / float(qmax - qmin)).to(dtype=scale_precision)
-    zero_points = torch.round(qmin - x_min / scales.float()).clamp(qmin, qmax).to(torch.uint8)
+    scales, zero_points = _asymmetric_scale_and_zero_point(
+        grouped, qmin, qmax, scale_precision
+    )
     q = torch.round(grouped / scales.float() + zero_points.float()).clamp(qmin, qmax).to(torch.uint8)
     q = q.reshape(*work.shape)
 
@@ -990,6 +987,55 @@ def _quantize_blockwise_asymmetric(
     else:
         q = q.to(torch.uint8)
     return q.contiguous(), scales.squeeze(-1).contiguous(), zero_points.squeeze(-1).contiguous()
+
+
+def _ceil_scale_to_precision(
+    required: torch.Tensor,
+    scale_precision: torch.dtype,
+) -> torch.Tensor:
+    """Store a scale without rounding below the required representable range."""
+    rounded = required.to(dtype=scale_precision)
+    rounded_float = rounded.float()
+    upward = torch.nextafter(rounded, torch.full_like(rounded, float("inf")))
+    return torch.where(rounded_float < required.float(), upward, rounded)
+
+
+def _symmetric_scales(
+    grouped: torch.Tensor,
+    qmax: int,
+    scale_precision: torch.dtype,
+) -> torch.Tensor:
+    required = grouped.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12) / max(qmax, 1)
+    return _ceil_scale_to_precision(required, scale_precision)
+
+
+def _asymmetric_scale_and_zero_point(
+    grouped: torch.Tensor,
+    qmin: int,
+    qmax: int,
+    scale_precision: torch.dtype,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    zeros = torch.zeros((), device=grouped.device, dtype=grouped.dtype)
+    x_min = torch.minimum(grouped.amin(dim=-1, keepdim=True), zeros)
+    x_max = torch.maximum(grouped.amax(dim=-1, keepdim=True), zeros)
+    base_scale = (x_max - x_min).clamp_min(1e-12) / float(qmax - qmin)
+    zero_points_float = torch.round(qmin - x_min / base_scale).clamp(qmin, qmax)
+
+    lower_capacity = zero_points_float - qmin
+    upper_capacity = qmax - zero_points_float
+    lower_scale = torch.where(
+        lower_capacity > 0,
+        (-x_min) / lower_capacity.clamp_min(1),
+        torch.zeros_like(base_scale),
+    )
+    upper_scale = torch.where(
+        upper_capacity > 0,
+        x_max / upper_capacity.clamp_min(1),
+        torch.zeros_like(base_scale),
+    )
+    required_scale = torch.maximum(base_scale, torch.maximum(lower_scale, upper_scale))
+    scales = _ceil_scale_to_precision(required_scale.clamp_min(1e-12), scale_precision)
+    return scales, zero_points_float.to(torch.uint8)
 
 
 def _dequantize_blockwise(

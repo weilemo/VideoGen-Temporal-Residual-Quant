@@ -35,7 +35,16 @@ def main() -> int:
     params = torch.load(
         root / "conditional_innovation_params.pt", map_location="cpu", weights_only=False
     )
-    quant = {"values": 0, "nonfinite": 0, "overflow": 0, "endpoint": 0}
+    quant = {
+        "values": 0,
+        "nonfinite": 0,
+        "overflow": 0,
+        "endpoint": 0,
+        "overflow_code_excess_sum": 0.0,
+        "max_code_excess": 0.0,
+        "by_role": {},
+        "by_layer": {},
+    }
     groups: list[list[dict]] = []
     for path_string in manifest["validation_dumps"]:
         for layer, key, value, metadata in iter_kv_dump_layers(Path(path_string), layers=args.layers):
@@ -57,6 +66,14 @@ def main() -> int:
             groups.append(local.get("event_rows", []))
             for key_name in ("values", "nonfinite", "overflow", "endpoint"):
                 quant[key_name] += int(local[key_name])
+            quant["overflow_code_excess_sum"] += float(
+                local.get("overflow_code_excess_sum", 0.0)
+            )
+            quant["max_code_excess"] = max(
+                quant["max_code_excess"], float(local.get("max_code_excess", 0.0))
+            )
+            _merge_breakdown(quant["by_role"], local.get("by_role", {}))
+            _merge_breakdown(quant["by_layer"], {str(layer): local})
 
     all_rows = [row for group in groups for row in group]
     threshold = float(np.quantile([row["shock_rel_l2"] for row in all_rows], args.event_quantile))
@@ -79,7 +96,12 @@ def main() -> int:
             "preclamp_overflow_fraction": overflow_fraction,
             "endpoint_occupancy_fraction": quant["endpoint"] / max(quant["values"], 1),
             "nonfinite_values": quant["nonfinite"],
-            "note": "dynamic per-block ranges make overflow diagnostic, while endpoint occupancy is reported",
+            "max_code_excess": quant["max_code_excess"],
+            "mean_code_excess_overflow": quant["overflow_code_excess_sum"]
+            / max(quant["overflow"], 1),
+            "by_role": _finalize_breakdown(quant["by_role"]),
+            "by_layer": _finalize_breakdown(quant["by_layer"]),
+            "note": "S2++ ranges include zero and use representability-safe stored scales; endpoint occupancy is diagnostic only",
         },
         "event_recovery_gate": {
             "status": "PASS" if events > 0 and recovery_rate >= args.minimum_recovery_rate else "FAIL",
@@ -106,6 +128,42 @@ def _unit_size(metadata: dict) -> int:
                 if source.get(key):
                     return int(source[key])
     raise ValueError("unit size missing from dump metadata")
+
+
+def _merge_breakdown(target: dict, source: dict) -> None:
+    for name, values in source.items():
+        merged = target.setdefault(
+            str(name),
+            {
+                "values": 0,
+                "nonfinite": 0,
+                "overflow": 0,
+                "endpoint": 0,
+                "overflow_code_excess_sum": 0.0,
+                "max_code_excess": 0.0,
+            },
+        )
+        for key in ("values", "nonfinite", "overflow", "endpoint"):
+            merged[key] += int(values.get(key, 0))
+        merged["overflow_code_excess_sum"] += float(
+            values.get("overflow_code_excess_sum", 0.0)
+        )
+        merged["max_code_excess"] = max(
+            merged["max_code_excess"], float(values.get("max_code_excess", 0.0))
+        )
+
+
+def _finalize_breakdown(values: dict) -> dict:
+    result = {}
+    for name, row in sorted(values.items()):
+        result[name] = {
+            **row,
+            "preclamp_overflow_fraction": row["overflow"] / max(row["values"], 1),
+            "endpoint_occupancy_fraction": row["endpoint"] / max(row["values"], 1),
+            "mean_code_excess_overflow": row["overflow_code_excess_sum"]
+            / max(row["overflow"], 1),
+        }
+    return result
 
 
 if __name__ == "__main__":
