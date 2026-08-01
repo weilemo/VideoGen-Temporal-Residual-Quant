@@ -1,6 +1,7 @@
 "use strict";
 
 const STORAGE_KEY = "videoquant-b1-grouped-review-v2";
+const MEDIA_AUTH_VERSION = 1;
 const labels = ["A", "B", "C", "D", "E"];
 const catastropheTags = [
   ["identity_switch", "身份切换 / Identity switch"],
@@ -53,6 +54,7 @@ function escapeHtml(value) {
 function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     manifest_sha256: state.manifest.manifest_sha256,
+    media_auth_version: MEDIA_AUTH_VERSION,
     reviewer_id: state.reviewerId,
     answers: state.answers,
   }));
@@ -64,6 +66,10 @@ function loadSaved() {
     if (saved?.manifest_sha256 === state.manifest.manifest_sha256) {
       state.reviewerId = saved.reviewer_id || "";
       state.answers = saved.answers || {};
+      if (saved.media_auth_version !== MEDIA_AUTH_VERSION) {
+        Object.values(state.answers).forEach((answer) => { answer.complete = false; });
+        save();
+      }
     }
   } catch (_) {
     // Preserve the bad payload for manual recovery instead of deleting it.
