@@ -73,9 +73,10 @@ def build_package(tmp_path: Path) -> tuple[Path, dict, dict]:
 def test_review_package_is_complete_and_public_manifest_is_anonymous(tmp_path):
     output, public, private = build_package(tmp_path)
 
-    assert public["task_count"] == 2 * 2 * 4 + 1 * 4
-    assert sum(task["kind"] == "catastrophe" for task in public["tasks"]) == 16
-    assert sum(task["kind"] == "action" for task in public["tasks"]) == 4
+    assert public["schema_version"] == 2
+    assert public["task_count"] == 2 * 2 + 1
+    assert sum(task["kind"] == "catastrophe" for task in public["tasks"]) == 4
+    assert sum(task["kind"] == "action" for task in public["tasks"]) == 1
     public_text = json.dumps(public).lower()
     for secret in ("bf16", "trq_int4", "trq_int2", "naive_int4", "naive_int2", "source_path"):
         assert secret not in public_text
@@ -85,12 +86,18 @@ def test_review_package_is_complete_and_public_manifest_is_anonymous(tmp_path):
         if task["baseline"] == "LongCat Video"
     )
     assert set(private["tasks"]) == {task["id"] for task in public["tasks"]}
+    assert all(set(task["labels"]) == set(prepare.PANEL_LABELS) for task in public["tasks"])
+    assert all(
+        len(private["tasks"][task["id"]]["items"]) == len(prepare.VARIANTS)
+        for task in public["tasks"]
+    )
     assert (output / "public" / "index.html").is_file()
     assert all(path.is_symlink() for path in (output / "public" / "media").rglob("*.mp4"))
     app_source = (output / "public" / "app.js").read_text(encoding="utf-8")
     assert "身份切换 / Identity switch" in app_source
-    assert "反事实分离 / Counterfactual separation" in app_source
-    assert "判定说明与例子 / Definitions and examples" in app_source
+    assert "steering_separation" in app_source
+    assert "togglePlayback" in app_source
+    assert "completeQuick" in app_source
 
 
 def test_review_package_refuses_to_overwrite_existing_package(tmp_path):
@@ -116,7 +123,8 @@ def test_decode_joins_variant_only_after_review(tmp_path):
         "answers": {
             task["id"]: {
                 "complete": True,
-                "sides": {
+                "verdict": "flagged",
+                "items": {
                     "A": {"severity": "0", "catastrophe": "no", "onset": "none"},
                     "B": {"severity": "2", "catastrophe": "yes", "onset": "middle"},
                 },
@@ -126,9 +134,70 @@ def test_decode_joins_variant_only_after_review(tmp_path):
 
     rows = decode.flatten_export(review, private)
 
-    assert len(rows) == 2
-    assert {row["variant"] for row in rows} == {"bf16", private["tasks"][task["id"]]["sides"]["A" if private["tasks"][task["id"]]["sides"]["A"]["variant"] != "bf16" else "B"]["variant"]}
+    assert len(rows) == 5
+    assert {row["variant"] for row in rows} == set(prepare.VARIANTS)
     assert all(row["complete"] for row in rows)
+
+
+def test_decode_v1_remains_supported():
+    mapping = {
+        "schema_version": 1,
+        "public_manifest_sha256": "v1",
+        "tasks": {
+            "old": {
+                "kind": "catastrophe",
+                "baseline": "Causal Forcing",
+                "prompt_index": 0,
+                "sides": {"A": {"variant": "bf16"}, "B": {"variant": "trq_int4"}},
+            }
+        },
+    }
+    review = {
+        "manifest_sha256": "v1",
+        "answers": {"old": {"complete": True, "sides": {"A": {}, "B": {}}}},
+    }
+    assert {row["variant"] for row in decode.flatten_export(review, mapping)} == {
+        "bf16",
+        "trq_int4",
+    }
+
+
+def test_decode_grouped_action_panel(tmp_path):
+    _, public, private = build_package(tmp_path)
+    task = next(task for task in public["tasks"] if task["kind"] == "action")
+    items = {}
+    for label in task["labels"]:
+        items[label] = {
+            "actions": {
+                action: {
+                    "rating": "pass",
+                    "onset": "early",
+                    "catastrophe": "no",
+                    "identity_preserved": "yes",
+                    "background_preserved": "yes",
+                    "motion_freeze": "no",
+                }
+                for action in task["actions"]
+            },
+            "pair": {"steering_separation": "2", "longitudinal_separation": "2"},
+        }
+    review = {
+        "manifest_sha256": public["manifest_sha256"],
+        "answers": {
+            task["id"]: {
+                "complete": True,
+                "verdict": "clear",
+                "items": items,
+            }
+        },
+    }
+
+    rows = decode.flatten_export(review, private)
+
+    assert len(rows) == len(prepare.VARIANTS) * len(prepare.ACTION_ORDER)
+    assert {row["variant"] for row in rows} == set(prepare.VARIANTS)
+    assert {row["action"] for row in rows} == set(prepare.ACTION_ORDER)
+    assert all(row["rating"] == "pass" for row in rows)
 
 
 def test_decode_rejects_a_different_manifest(tmp_path):

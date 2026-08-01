@@ -193,11 +193,11 @@ RUN_ID=b1_moviegen32_20260728 \
 
 ### B1 匿名人工审阅包
 
-人工审阅使用独立的静态网页。公开目录只包含匿名 A/B 任务和媒体链接；方法、bit、原始
-路径与 A/B 对应关系只写入公开目录上一级的 `private_mapping.json`，不能把整个输出根
-作为网页根目录。MovieGen32 为每个 baseline、prompt 和量化候选分别建立 BF16 对照，
-共 `2 x 32 x 4 = 256` 个 catastrophe 任务；HY holdout 为每个场景和候选建立包含四个
-动作的 A/B group，5 个场景共 20 个 action 任务。
+人工审阅使用独立的静态网页。公开目录只包含匿名 A--E 面板和媒体链接；方法、bit、原始
+路径与 A--E 对应关系只写入公开目录上一级的 `private_mapping.json`，不能把整个输出根
+作为网页根目录。Schema v2 将同一 prompt 的 BF16 和四个量化候选五路合并：MovieGen32
+共 `2 x 32 = 64` 个 catastrophe 面板；HY holdout 将每个场景的五种精度和四个动作合并，
+5 个场景共 5 个 action 面板。视频覆盖不变，但不再重复展示 BF16 或填写重复表单。
 
 ```bash
 python experiments/world_model_quant/prepare_b1_review.py \
@@ -210,8 +210,10 @@ cd results/world_model_quant/review/b1_moviegen32_20260729/public
 python -m http.server 8766
 ```
 
-网页使用浏览器本地存储自动保存，并导出带 manifest SHA-256 的 JSON。审阅结束后才使用
-私有映射解盲；hash 不一致时脚本拒绝合并：
+网页使用浏览器本地存储自动保存，并导出带 manifest SHA-256 的 JSON。它支持五路同步
+播放、统一倍速、动作标签页和快速通过；按 `Space` 播放/暂停、`1`--`5` 标记可疑视频、
+`N` 快速通过、方向键导航。只有可疑视频需要展开 catastrophe 细节。审阅结束后才使用
+私有映射解盲；hash 不一致时脚本拒绝合并，旧 schema v1 导出仍可由解码器读取：
 
 ```bash
 python experiments/world_model_quant/decode_b1_review.py \

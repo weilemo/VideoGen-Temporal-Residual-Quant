@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an anonymous, static B1 catastrophe/action review package."""
+"""Build an anonymous, grouped B1 catastrophe/action review package."""
 
 from __future__ import annotations
 
@@ -13,7 +13,9 @@ from pathlib import Path
 
 
 CANDIDATES = ("trq_int4", "trq_int2", "naive_int4", "naive_int2")
+VARIANTS = ("bf16", *CANDIDATES)
 ACTION_ORDER = ("turn_left", "turn_right", "forward", "backward")
+PANEL_LABELS = ("A", "B", "C", "D", "E")
 APP_FILES = ("index.html", "app.js", "styles.css")
 
 
@@ -57,7 +59,7 @@ def index_moviegen_manifest(path: Path, expected_prompts: int) -> dict:
             raise ValueError(f"duplicate MovieGen record {key} in {path}")
         indexed[key] = record
     for prompt_index in range(expected_prompts):
-        for variant in ("bf16", *CANDIDATES):
+        for variant in VARIANTS:
             if (prompt_index, variant) not in indexed:
                 raise ValueError(f"missing MovieGen record {(prompt_index, variant)} in {path}")
     return indexed
@@ -78,37 +80,38 @@ def build_movie_tasks(
     for prompt_index in range(expected_prompts):
         bf16 = indexed[(prompt_index, "bf16")]
         prompt = str(bf16["prompt"])
-        for candidate in CANDIDATES:
-            task_id = anonymous_id(rng, used, "V")
-            sides = [("bf16", bf16), (candidate, indexed[(prompt_index, candidate)])]
-            rng.shuffle(sides)
-            media: dict[str, str] = {}
-            private_sides: dict[str, dict] = {}
-            for side, (variant, record) in zip(("A", "B"), sides, strict=True):
-                relative = Path("media") / "video" / task_id / f"{side}.mp4"
-                safe_link(Path(record["source_path"]), public_root / relative)
-                media[side] = relative.as_posix()
-                private_sides[side] = {
-                    "variant": variant,
-                    "source_path": str(Path(record["source_path"]).resolve()),
-                }
-            task = {
-                "id": task_id,
-                "kind": "catastrophe",
-                "baseline": baseline,
-                "prompt_index": prompt_index,
-                "prompt": prompt,
-                "media": media,
+        task_id = anonymous_id(rng, used, "V")
+        variants = list(VARIANTS)
+        rng.shuffle(variants)
+        media: dict[str, str] = {}
+        private_items: dict[str, dict] = {}
+        for label, variant in zip(PANEL_LABELS, variants, strict=True):
+            record = indexed[(prompt_index, variant)]
+            relative = Path("media") / "video" / task_id / f"{label}.mp4"
+            safe_link(Path(record["source_path"]), public_root / relative)
+            media[label] = relative.as_posix()
+            private_items[label] = {
+                "variant": variant,
+                "source_path": str(Path(record["source_path"]).resolve()),
             }
-            if baseline == "LongCat Video":
-                task["conditioning_frames"] = 13
-            tasks.append(task)
-            private[task_id] = {
-                "kind": "catastrophe",
-                "baseline": baseline,
-                "prompt_index": prompt_index,
-                "sides": private_sides,
-            }
+        task = {
+            "id": task_id,
+            "kind": "catastrophe",
+            "baseline": baseline,
+            "prompt_index": prompt_index,
+            "prompt": prompt,
+            "labels": list(PANEL_LABELS),
+            "media": media,
+        }
+        if baseline == "LongCat Video":
+            task["conditioning_frames"] = 13
+        tasks.append(task)
+        private[task_id] = {
+            "kind": "catastrophe",
+            "baseline": baseline,
+            "prompt_index": prompt_index,
+            "items": private_items,
+        }
     return tasks, private
 
 
@@ -146,40 +149,40 @@ def build_action_tasks(
     tasks: list[dict] = []
     private: dict[str, dict] = {}
     for scene_index, scene in enumerate(scenes):
-        for candidate in CANDIDATES:
-            task_id = anonymous_id(rng, used, "A")
-            variants = ["bf16", candidate]
-            rng.shuffle(variants)
-            media: dict[str, dict[str, str]] = {}
-            private_sides: dict[str, dict] = {}
-            for side, variant in zip(("A", "B"), variants, strict=True):
-                media[side] = {}
-                sources = {}
-                for action in ACTION_ORDER:
-                    source = unique_action_video(root, scene, action, variant)
-                    relative = Path("media") / "action" / task_id / side / f"{action}.mp4"
-                    safe_link(source, public_root / relative)
-                    media[side][action] = relative.as_posix()
-                    sources[action] = str(source)
-                private_sides[side] = {"variant": variant, "source_paths": sources}
-            tasks.append(
-                {
-                    "id": task_id,
-                    "kind": "action",
-                    "baseline": "HY-WorldPlay",
-                    "scene_index": scene_index,
-                    "scene_label": f"Scene {scene_index + 1:02d}",
-                    "actions": list(ACTION_ORDER),
-                    "media": media,
-                }
-            )
-            private[task_id] = {
+        task_id = anonymous_id(rng, used, "A")
+        variants = list(VARIANTS)
+        rng.shuffle(variants)
+        media: dict[str, dict[str, str]] = {}
+        private_items: dict[str, dict] = {}
+        for label, variant in zip(PANEL_LABELS, variants, strict=True):
+            media[label] = {}
+            sources = {}
+            for action in ACTION_ORDER:
+                source = unique_action_video(root, scene, action, variant)
+                relative = Path("media") / "action" / task_id / label / f"{action}.mp4"
+                safe_link(source, public_root / relative)
+                media[label][action] = relative.as_posix()
+                sources[action] = str(source)
+            private_items[label] = {"variant": variant, "source_paths": sources}
+        tasks.append(
+            {
+                "id": task_id,
                 "kind": "action",
                 "baseline": "HY-WorldPlay",
                 "scene_index": scene_index,
-                "scene_source_id": scene.name,
-                "sides": private_sides,
+                "scene_label": f"Scene {scene_index + 1:02d}",
+                "labels": list(PANEL_LABELS),
+                "actions": list(ACTION_ORDER),
+                "media": media,
             }
+        )
+        private[task_id] = {
+            "kind": "action",
+            "baseline": "HY-WorldPlay",
+            "scene_index": scene_index,
+            "scene_source_id": scene.name,
+            "items": private_items,
+        }
     return tasks, private
 
 
@@ -234,8 +237,8 @@ def write_package(args: argparse.Namespace) -> dict:
     rng.shuffle(public_tasks)
 
     public_manifest = {
-        "schema_version": 1,
-        "study": "B1 anonymous catastrophe and action review",
+        "schema_version": 2,
+        "study": "B1 grouped anonymous catastrophe and action review",
         "task_count": len(public_tasks),
         "tasks": public_tasks,
     }
@@ -243,7 +246,7 @@ def write_package(args: argparse.Namespace) -> dict:
     manifest_sha256 = hashlib.sha256(canonical_public.encode()).hexdigest()
     public_manifest["manifest_sha256"] = manifest_sha256
     private_mapping = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "seed": args.seed,
         "public_manifest_sha256": manifest_sha256,
@@ -257,13 +260,16 @@ def write_package(args: argparse.Namespace) -> dict:
         json.dumps(private_mapping, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "public_root": str(public_root),
         "private_mapping": str(private_mapping_path),
         "manifest_sha256": manifest_sha256,
         "catastrophe_tasks": sum(t["kind"] == "catastrophe" for t in public_tasks),
         "action_tasks": sum(t["kind"] == "action" for t in public_tasks),
         "total_tasks": len(public_tasks),
+        "catastrophe_panels": sum(t["kind"] == "catastrophe" for t in public_tasks),
+        "action_panels": sum(t["kind"] == "action" for t in public_tasks),
+        "total_panels": len(public_tasks),
     }
     (output_root / "package_summary.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

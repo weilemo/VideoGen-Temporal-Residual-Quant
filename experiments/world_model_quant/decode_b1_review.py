@@ -17,6 +17,37 @@ def read_json(path: Path) -> dict:
 def flatten_export(review: dict, mapping: dict) -> list[dict]:
     if review.get("manifest_sha256") != mapping.get("public_manifest_sha256"):
         raise ValueError("review export and private mapping use different manifests")
+    if mapping.get("schema_version", 1) == 1:
+        return flatten_v1(review, mapping)
+    rows: list[dict] = []
+    for task_id, answer in review.get("answers", {}).items():
+        private = mapping.get("tasks", {}).get(task_id)
+        if private is None:
+            raise ValueError(f"unknown task id in review export: {task_id}")
+        for label, item in private.get("items", {}).items():
+            item_answer = answer.get("items", {}).get(label, {})
+            row = {
+                "task_id": task_id,
+                "kind": private["kind"],
+                "baseline": private["baseline"],
+                "prompt_or_scene_index": private.get("prompt_index", private.get("scene_index")),
+                "label": label,
+                "variant": item["variant"],
+                "complete": bool(answer.get("complete")),
+                "panel_verdict": answer.get("verdict", ""),
+            }
+            if private["kind"] == "catastrophe":
+                row.update(item_answer)
+                rows.append(row)
+            else:
+                pair = item_answer.get("pair", {})
+                for action, action_answer in item_answer.get("actions", {}).items():
+                    action_row = {**row, **pair, **action_answer, "action": action}
+                    rows.append(action_row)
+    return rows
+
+
+def flatten_v1(review: dict, mapping: dict) -> list[dict]:
     rows: list[dict] = []
     for task_id, answer in review.get("answers", {}).items():
         private = mapping.get("tasks", {}).get(task_id)
@@ -39,8 +70,7 @@ def flatten_export(review: dict, mapping: dict) -> list[dict]:
             else:
                 pair = side_answer.get("pair", {})
                 for action, action_answer in side_answer.get("actions", {}).items():
-                    action_row = {**row, **pair, **action_answer, "action": action}
-                    rows.append(action_row)
+                    rows.append({**row, **pair, **action_answer, "action": action})
     return rows
 
 

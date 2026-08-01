@@ -1,6 +1,7 @@
 "use strict";
 
-const STORAGE_KEY = "videoquant-b1-anonymous-review-v1";
+const STORAGE_KEY = "videoquant-b1-grouped-review-v2";
+const labels = ["A", "B", "C", "D", "E"];
 const catastropheTags = [
   ["identity_switch", "身份切换 / Identity switch"],
   ["background_jump", "背景跳变 / Background jump"],
@@ -20,34 +21,20 @@ const baselineLabels = {
   "LongCat Video": "LongCat 视频 / LongCat Video",
   "HY-WorldPlay": "HY-WorldPlay 世界模型 / World Model",
 };
-const catastropheRubric = `
-  <details class="rubric" open>
-    <summary>判定说明与例子 / Definitions and examples</summary>
-    <dl class="rubric-grid">
-      <div><dt>身份切换 / Identity switch</dt><dd>主体身份、外观或关键物体突然变成另一个；例如人物脸、车辆型号或服装无因改变。</dd></div>
-      <div><dt>背景跳变 / Background jump</dt><dd>相机运动无法解释的场景突变；例如道路、房间布局或地平线在相邻帧瞬移。</dd></div>
-      <div><dt>纹理重复 / Texture repetition</dt><dd>局部纹理出现明显复制、周期性条带或不断累积的图案。</dd></div>
-      <div><dt>运动冻结 / Motion freeze</dt><dd>视频仍在播放，但主体或整幅画面异常静止；短暂停顿后恢复也应记录。</dd></div>
-      <div><dt>颜色漂移 / Color drift</dt><dd>整体色调或局部颜色持续偏移，且不是光照或场景变化造成。</dd></div>
-      <div><dt>黑帧或无效帧 / Black or invalid frames</dt><dd>黑屏、纯色帧、严重花屏、NaN 式噪声或无法辨认的解码异常。</dd></div>
-      <div><dt>严重度 / Severity</dt><dd>0 无；1 轻微且不影响理解；2 明显影响内容；3 严重破坏主体、场景或连续性。</dd></div>
-      <div><dt>灾难失败 / Catastrophic failure</dt><dd>主体或场景连续性被根本破坏，视频无法再按原 prompt 正常理解；轻微模糊不算灾难。</dd></div>
-    </dl>
-  </details>`;
-const actionRubric = `
-  <details class="rubric" open>
-    <summary>动作判定说明与例子 / Action review definitions</summary>
-    <dl class="rubric-grid">
-      <div><dt>动作执行 / Action executed</dt><dd>Yes：清楚完成目标动作；Partial：方向可见但幅度弱、迟到或只完成一部分；No：没有响应或执行了相反动作。</dd></div>
-      <div><dt>方向正确 / Direction correct</dt><dd>只判断运动方向是否符合标签；看不清或镜头运动造成歧义时选 Unclear，不要猜测。</dd></div>
-      <div><dt>响应时机 / Response onset</dt><dd>记录首次可确认动作出现于视频前段、中段、后段；始终没有则选 Never。</dd></div>
-      <div><dt>身份与背景保持 / Identity and background preserved</dt><dd>动作过程中主体外观和环境布局应保持连续；遮挡导致暂时看不清可选 Unclear。</dd></div>
-      <div><dt>反事实分离 / Counterfactual separation</dt><dd>0：两种相反动作几乎一样；1：存在差别但较弱；2：左右或前后轨迹清楚分开。</dd></div>
-      <div><dt>灾难失败 / Catastrophic failure</dt><dd>黑屏、主体消失、场景崩坏、长期冻结，或动作完全失控到无法判断原任务。</dd></div>
-    </dl>
-  </details>`;
+const rubric = {
+  catastrophe: `<details class="rubric"><summary>异常定义 / Failure definitions</summary><p>只标记可见异常。轻微清晰度差异不算灾难；身份或场景连续性被根本破坏、黑屏或长期冻结才算 catastrophe。</p></details>`,
+  action: `<details class="rubric"><summary>动作判定 / Action definitions</summary><p>通过：方向明确且及时；部分：方向可见但幅度弱或迟到；失败：未响应或方向相反。不确定时不要猜。</p></details>`,
+};
 
-const state = { manifest: null, index: 0, reviewerId: "", answers: {} };
+const state = {
+  manifest: null,
+  index: 0,
+  reviewerId: "",
+  answers: {},
+  action: "turn_left",
+  speed: 1,
+  syncing: false,
+};
 const byId = (id) => document.getElementById(id);
 
 function escapeHtml(value) {
@@ -65,149 +52,247 @@ function save() {
 }
 
 function loadSaved() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return;
   try {
-    const saved = JSON.parse(raw);
-    if (saved.manifest_sha256 === state.manifest.manifest_sha256) {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (saved?.manifest_sha256 === state.manifest.manifest_sha256) {
       state.reviewerId = saved.reviewer_id || "";
       state.answers = saved.answers || {};
     }
   } catch (_) {
-    localStorage.removeItem(STORAGE_KEY);
+    // Preserve the bad payload for manual recovery instead of deleting it.
   }
 }
 
 function answerFor(task) {
-  if (!state.answers[task.id]) state.answers[task.id] = { complete: false, sides: {} };
+  if (!state.answers[task.id]) {
+    state.answers[task.id] = { complete: false, verdict: "", items: {} };
+  }
   return state.answers[task.id];
 }
 
-function catastropheForm(task, side) {
-  const answer = answerFor(task).sides[side] || {};
-  const checks = catastropheTags.map(([key, label]) => `
-    <label><input type="checkbox" data-field="${key}" ${answer[key] ? "checked" : ""}>${label}</label>
-  `).join("");
-  return `<div class="form-body" data-side="${side}">
-    <fieldset><legend>观察到的失败 / Observed failures</legend><div class="check-grid">${checks}</div></fieldset>
+function itemFor(task, label) {
+  const answer = answerFor(task);
+  if (!answer.items[label]) answer.items[label] = {};
+  return answer.items[label];
+}
+
+function selectField(key, label, options, selected) {
+  const rendered = options.map(([value, text]) =>
+    `<option value="${escapeHtml(value)}" ${String(selected ?? "") === value ? "selected" : ""}>${escapeHtml(text)}</option>`
+  ).join("");
+  return `<label class="field">${label}<select data-field="${key}">${rendered}</select></label>`;
+}
+
+function catastropheDetails(task, label) {
+  const item = itemFor(task, label);
+  const checks = catastropheTags.map(([key, text]) =>
+    `<label><input type="checkbox" data-field="${key}" ${item[key] ? "checked" : ""}>${text}</label>`
+  ).join("");
+  return `<div class="details ${item.flagged ? "" : "is-hidden"}" data-details>
+    <div class="check-grid">${checks}</div>
     <div class="field-grid">
-      ${selectField("severity", "总体严重度 / Overall severity", [["", "请选择 / Select"], ["0", "0 - 无 / None"], ["1", "1 - 轻微 / Mild"], ["2", "2 - 明显 / Material"], ["3", "3 - 严重 / Severe"]], answer.severity)}
-      ${selectField("catastrophe", "是否为灾难失败？/ Catastrophic failure?", [["", "请选择 / Select"], ["no", "否 / No"], ["yes", "是 / Yes"]], answer.catastrophe)}
-      ${selectField("onset", "首次出现位置 / First visible onset", [["", "请选择 / Select"], ["none", "未出现 / None"], ["early", "前段 / Early"], ["middle", "中段 / Middle"], ["late", "后段 / Late"]], answer.onset)}
-      <label class="field">备注 / Notes<textarea data-field="notes">${escapeHtml(answer.notes || "")}</textarea></label>
+      ${selectField("severity", "严重度 / Severity", [["", "请选择"], ["1", "1 轻微"], ["2", "2 明显"], ["3", "3 严重"]], item.severity)}
+      ${selectField("catastrophe", "灾难失败 / Catastrophe", [["", "请选择"], ["no", "否"], ["yes", "是"]], item.catastrophe)}
+      ${selectField("onset", "首次出现 / Onset", [["", "请选择"], ["early", "前段"], ["middle", "中段"], ["late", "后段"]], item.onset)}
+      <label class="field">备注 / Notes<textarea data-field="notes">${escapeHtml(item.notes || "")}</textarea></label>
     </div>
   </div>`;
 }
 
-function selectField(key, label, options, selected) {
-  const rendered = options.map((option) => {
-    const [actual, display] = Array.isArray(option) ? option : [option, option || "请选择 / Select"];
-    return `<option value="${escapeHtml(actual)}" ${String(selected ?? "") === actual ? "selected" : ""}>${escapeHtml(display)}</option>`;
-  }).join("");
-  return `<label class="field">${label}<select data-field="${key}">${rendered}</select></label>`;
-}
-
 function renderCatastrophe(task) {
-  byId("review-root").innerHTML = `<div class="comparison">${["A", "B"].map((side) => `
-    <article class="side"><h2>视频 ${side} / Video ${side}</h2>
-      <video controls preload="metadata" src="${task.media[side]}"></video>
-      ${catastropheForm(task, side)}
-    </article>`).join("")}</div>`;
+  byId("action-tabs").hidden = true;
+  byId("review-root").innerHTML = `<div class="video-panel">${task.labels.map((label) => {
+    const item = itemFor(task, label);
+    return `<article class="video-card" data-label="${label}">
+      <div class="card-title"><h2>${label}</h2><label class="flag-control"><input type="checkbox" data-flag ${item.flagged ? "checked" : ""}>可疑 / Flag</label></div>
+      <video controls preload="metadata" src="${task.media[label]}"></video>
+      ${catastropheDetails(task, label)}
+    </article>`;
+  }).join("")}</div>`;
 }
 
-function actionForm(task, side) {
-  const sideAnswer = answerFor(task).sides[side] || {};
-  const actions = task.actions.map((action) => {
-    const answer = (sideAnswer.actions || {})[action] || {};
-    return `<fieldset data-action="${action}"><legend>${actionLabels[action]}</legend><div class="field-grid">
-      ${selectField("action_executed", "动作是否执行 / Action executed", [["", "请选择 / Select"], ["yes", "是 / Yes"], ["partial", "部分 / Partial"], ["no", "否 / No"]], answer.action_executed)}
-      ${selectField("direction_correct", "方向是否正确 / Direction correct", [["", "请选择 / Select"], ["yes", "是 / Yes"], ["no", "否 / No"], ["unclear", "不确定 / Unclear"]], answer.direction_correct)}
-      ${selectField("onset", "响应开始位置 / Response onset", [["", "请选择 / Select"], ["early", "前段 / Early"], ["middle", "中段 / Middle"], ["late", "后段 / Late"], ["never", "未响应 / Never"]], answer.onset)}
-      ${selectField("catastrophe", "是否为灾难失败？/ Catastrophic failure?", [["", "请选择 / Select"], ["no", "否 / No"], ["yes", "是 / Yes"]], answer.catastrophe)}
-      ${selectField("identity_preserved", "身份是否保持 / Identity preserved", [["", "请选择 / Select"], ["yes", "是 / Yes"], ["no", "否 / No"], ["unclear", "不确定 / Unclear"]], answer.identity_preserved)}
-      ${selectField("background_preserved", "背景是否保持 / Background preserved", [["", "请选择 / Select"], ["yes", "是 / Yes"], ["no", "否 / No"], ["unclear", "不确定 / Unclear"]], answer.background_preserved)}
-      ${selectField("motion_freeze", "是否运动冻结 / Motion freeze", [["", "请选择 / Select"], ["no", "否 / No"], ["yes", "是 / Yes"]], answer.motion_freeze)}
-    </div></fieldset>`;
-  }).join("");
-  const pair = sideAnswer.pair || {};
-  return `<div class="form-body" data-side="${side}">${actions}
-    <fieldset data-pair="true"><legend>反事实分离 / Counterfactual separation</legend><div class="field-grid">
-      ${selectField("steering_separation", "左右分离 / Left vs right separation", [["", "请选择 / Select"], ["0", "0 - 无 / Absent"], ["1", "1 - 弱 / Weak"], ["2", "2 - 清楚 / Clear"]], pair.steering_separation)}
-      ${selectField("longitudinal_separation", "前后分离 / Forward vs backward separation", [["", "请选择 / Select"], ["0", "0 - 无 / Absent"], ["1", "1 - 弱 / Weak"], ["2", "2 - 清楚 / Clear"]], pair.longitudinal_separation)}
-      <label class="field">备注 / Notes<textarea data-field="notes">${escapeHtml(pair.notes || "")}</textarea></label>
-    </div></fieldset>
-  </div>`;
+function actionDetails(item) {
+  return `<details class="compact-details"><summary>异常细节 / Details</summary><div class="field-grid">
+    ${selectField("catastrophe", "灾难失败", [["no", "否"], ["yes", "是"]], item.catastrophe || "no")}
+    ${selectField("identity_preserved", "身份保持", [["yes", "是"], ["no", "否"], ["unclear", "不确定"]], item.identity_preserved || "yes")}
+    ${selectField("background_preserved", "背景保持", [["yes", "是"], ["no", "否"], ["unclear", "不确定"]], item.background_preserved || "yes")}
+    ${selectField("motion_freeze", "运动冻结", [["no", "否"], ["yes", "是"]], item.motion_freeze || "no")}
+  </div></details>`;
 }
 
 function renderAction(task) {
-  byId("review-root").innerHTML = `<div class="comparison">${["A", "B"].map((side) => `
-    <article class="side"><h2>组 ${side} / Group ${side}</h2><div class="action-grid">
-      ${task.actions.map((action) => `<div class="action-video"><h3>${actionLabels[action]}</h3><video controls preload="metadata" src="${task.media[side][action]}"></video></div>`).join("")}
-    </div>${actionForm(task, side)}</article>`).join("")}</div>`;
+  byId("action-tabs").hidden = false;
+  byId("action-tabs").innerHTML = task.actions.map((action) =>
+    `<button type="button" data-action-tab="${action}" class="${state.action === action ? "active" : ""}">${actionLabels[action]}</button>`
+  ).join("");
+  byId("review-root").innerHTML = `<div class="video-panel">${task.labels.map((label) => {
+    const parent = itemFor(task, label);
+    parent.actions ||= {};
+    parent.pair ||= {};
+    const item = parent.actions[state.action] || {};
+    return `<article class="video-card" data-label="${label}" data-action="${state.action}">
+      <div class="card-title"><h2>${label}</h2><span>${actionLabels[state.action]}</span></div>
+      <video controls preload="metadata" src="${task.media[label][state.action]}"></video>
+      <div class="field-grid compact">
+        ${selectField("rating", "动作结果 / Result", [["", "请选择"], ["pass", "通过"], ["partial", "部分或迟到"], ["fail", "失败"], ["unclear", "不确定"]], item.rating)}
+        ${selectField("onset", "响应开始 / Onset", [["", "请选择"], ["early", "前段"], ["middle", "中段"], ["late", "后段"], ["never", "未响应"]], item.onset)}
+      </div>
+      ${actionDetails(item)}
+      <div class="pair-fields ${state.action === task.actions.at(-1) ? "" : "is-hidden"}" data-pair>
+        ${selectField("steering_separation", "左右分离", [["", "请选择"], ["0", "0 无"], ["1", "1 弱"], ["2", "2 清楚"]], parent.pair.steering_separation)}
+        ${selectField("longitudinal_separation", "前后分离", [["", "请选择"], ["0", "0 无"], ["1", "1 弱"], ["2", "2 清楚"]], parent.pair.longitudinal_separation)}
+      </div>
+    </article>`;
+  }).join("")}</div>`;
+  byId("action-tabs").querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
+    collectCurrent();
+    state.action = button.dataset.actionTab;
+    render();
+  }));
 }
 
 function collectCurrent() {
   const task = state.manifest.tasks[state.index];
   if (!task) return;
-  const answer = answerFor(task);
-  document.querySelectorAll("[data-side]").forEach((sideRoot) => {
-    const side = sideRoot.dataset.side;
+  document.querySelectorAll(".video-card").forEach((card) => {
+    const label = card.dataset.label;
+    const parent = itemFor(task, label);
     if (task.kind === "catastrophe") {
-      const values = {};
-      sideRoot.querySelectorAll("[data-field]").forEach((input) => {
-        values[input.dataset.field] = input.type === "checkbox" ? input.checked : input.value;
+      parent.flagged = card.querySelector("[data-flag]").checked;
+      card.querySelectorAll("[data-field]").forEach((input) => {
+        parent[input.dataset.field] = input.type === "checkbox" ? input.checked : input.value;
       });
-      answer.sides[side] = values;
     } else {
-      const sideValue = { actions: {}, pair: {} };
-      sideRoot.querySelectorAll("[data-action]").forEach((root) => {
-        const values = {};
-        root.querySelectorAll("[data-field]").forEach((input) => {
-          values[input.dataset.field] = input.type === "checkbox" ? input.checked : input.value;
-        });
-        sideValue.actions[root.dataset.action] = values;
+      parent.actions ||= {};
+      parent.pair ||= {};
+      const item = parent.actions[card.dataset.action] || {};
+      card.querySelectorAll(":scope > .field-grid [data-field], :scope > details [data-field]").forEach((input) => {
+        item[input.dataset.field] = input.value;
       });
-      sideRoot.querySelectorAll("[data-pair] [data-field]").forEach((input) => {
-        sideValue.pair[input.dataset.field] = input.value;
+      parent.actions[card.dataset.action] = item;
+      card.querySelectorAll("[data-pair] [data-field]").forEach((input) => {
+        parent.pair[input.dataset.field] = input.value;
       });
-      answer.sides[side] = sideValue;
     }
   });
-  answer.complete = false;
+  answerFor(task).complete = false;
   save();
 }
 
-function missingFields(task, answer) {
-  const missing = [];
-  for (const side of ["A", "B"]) {
-    const sideAnswer = answer.sides[side] || {};
-    if (task.kind === "catastrophe") {
-      for (const field of ["severity", "catastrophe", "onset"]) if (sideAnswer[field] === undefined || sideAnswer[field] === "") missing.push(`${side}.${field}`);
-    } else {
+function clearCatastrophe(task) {
+  const answer = answerFor(task);
+  answer.verdict = "clear";
+  answer.items = Object.fromEntries(task.labels.map((label) => [label, {
+    flagged: false, severity: "0", catastrophe: "no", onset: "none",
+  }]));
+}
+
+function clearAction(task) {
+  const answer = answerFor(task);
+  answer.verdict = "clear";
+  answer.items = Object.fromEntries(task.labels.map((label) => [label, {
+    actions: Object.fromEntries(task.actions.map((action) => [action, {
+      rating: "pass", onset: "early", catastrophe: "no", identity_preserved: "yes",
+      background_preserved: "yes", motion_freeze: "no",
+    }])),
+    pair: { steering_separation: "2", longitudinal_separation: "2" },
+  }]));
+}
+
+function validateDetailed(task) {
+  const answer = answerFor(task);
+  if (task.kind === "catastrophe") {
+    const flagged = task.labels.filter((label) => answer.items[label]?.flagged);
+    if (!flagged.length) return "未发现异常时请使用绿色快速通过按钮。";
+    for (const label of flagged) {
+      const item = answer.items[label];
+      if (!item.severity || !item.catastrophe || !item.onset) return `请补齐 ${label} 的异常细节。`;
+    }
+  } else {
+    for (const label of task.labels) {
+      const item = answer.items[label] || {};
       for (const action of task.actions) {
-        const actionAnswer = (sideAnswer.actions || {})[action] || {};
-        for (const field of ["action_executed", "direction_correct", "onset", "catastrophe", "identity_preserved", "background_preserved", "motion_freeze"]) if (!actionAnswer[field]) missing.push(`${side}.${action}.${field}`);
+        if (!item.actions?.[action]?.rating || !item.actions?.[action]?.onset) return `请完成 ${label} 的四个动作判断。`;
       }
-      for (const field of ["steering_separation", "longitudinal_separation"]) if ((sideAnswer.pair || {})[field] === undefined || (sideAnswer.pair || {})[field] === "") missing.push(`${side}.${field}`);
+      if (!item.pair?.steering_separation || !item.pair?.longitudinal_separation) return `请在“后退”页填写 ${label} 的反事实分离。`;
     }
   }
-  return missing;
+  return "";
+}
+
+function requireReviewer() {
+  if (state.reviewerId.trim()) return true;
+  byId("validation").textContent = "请先填写审阅者 ID / Reviewer ID is required.";
+  byId("reviewer-id").focus();
+  return false;
+}
+
+function completeQuick() {
+  if (!requireReviewer()) return;
+  const task = state.manifest.tasks[state.index];
+  task.kind === "catastrophe" ? clearCatastrophe(task) : clearAction(task);
+  answerFor(task).complete = true;
+  save();
+  nextIncomplete(false);
+}
+
+function completeDetailed() {
+  if (!requireReviewer()) return;
+  collectCurrent();
+  const task = state.manifest.tasks[state.index];
+  const error = validateDetailed(task);
+  if (error) { byId("validation").textContent = error; return; }
+  if (task.kind === "catastrophe") {
+    task.labels.forEach((label) => {
+      const item = itemFor(task, label);
+      if (!item.flagged) Object.assign(item, { severity: "0", catastrophe: "no", onset: "none" });
+    });
+  }
+  answerFor(task).verdict = "flagged";
+  answerFor(task).complete = true;
+  save();
+  nextIncomplete(false);
+}
+
+function videos() { return [...document.querySelectorAll("video")]; }
+
+function applyVideoSettings() {
+  videos().forEach((video) => { video.playbackRate = state.speed; });
+  videos().forEach((video) => video.addEventListener("seeking", () => {
+    if (state.syncing) return;
+    state.syncing = true;
+    videos().forEach((other) => { if (other !== video) other.currentTime = video.currentTime; });
+    state.syncing = false;
+  }));
+}
+
+async function togglePlayback() {
+  const clips = videos();
+  if (!clips.length) return;
+  if (clips.some((video) => !video.paused)) {
+    clips.forEach((video) => video.pause());
+    return;
+  }
+  const time = Math.min(...clips.map((video) => Number.isFinite(video.currentTime) ? video.currentTime : 0));
+  clips.forEach((video) => { video.currentTime = time; video.playbackRate = state.speed; });
+  await Promise.allSettled(clips.map((video) => video.play()));
 }
 
 function render() {
   const task = state.manifest.tasks[state.index];
   if (!task) return;
-  byId("task-meta").textContent = `任务 ${state.index + 1} / ${state.manifest.task_count} · Task ${state.index + 1} of ${state.manifest.task_count}`;
-  byId("kind-badge").textContent = task.kind === "catastrophe" ? "视频质量 / VIDEO QUALITY" : "动作控制 / ACTION CONTROL";
+  byId("task-meta").textContent = `面板 ${state.index + 1} / ${state.manifest.task_count}`;
+  byId("kind-badge").textContent = task.kind === "catastrophe" ? "视频质量" : "动作控制";
   byId("baseline").textContent = baselineLabels[task.baseline] || task.baseline;
-  byId("prompt").textContent = task.prompt ? `提示词 ${task.prompt_index + 1} / Prompt ${task.prompt_index + 1}: ${task.prompt}` : `场景 ${task.scene_index + 1} / ${task.scene_label}`;
-  const note = byId("conditioning-note");
-  note.hidden = !task.conditioning_frames;
-  note.textContent = task.conditioning_frames ? `仅评判生成的续写部分；忽略前 ${task.conditioning_frames} 个共享条件帧。/ Judge the generated continuation only; ignore the first ${task.conditioning_frames} shared conditioning frames.` : "";
-  byId("rubric").innerHTML = task.kind === "catastrophe" ? catastropheRubric : actionRubric;
+  byId("prompt").textContent = task.prompt ? `Prompt ${task.prompt_index + 1}: ${task.prompt}` : `场景 ${task.scene_index + 1} / ${task.scene_label}`;
+  byId("conditioning-note").hidden = !task.conditioning_frames;
+  byId("conditioning-note").textContent = task.conditioning_frames ? `只评判生成续写，忽略前 ${task.conditioning_frames} 个共享条件帧。` : "";
+  byId("rubric").innerHTML = rubric[task.kind];
+  byId("quick-complete").textContent = task.kind === "catastrophe" ? "未发现明显异常，下一项 (N)" : "全部动作清楚且及时，下一项 (N)";
   task.kind === "catastrophe" ? renderCatastrophe(task) : renderAction(task);
-  byId("validation").textContent = answerFor(task).complete ? "已保存为完成 / Saved as complete." : "";
+  byId("validation").textContent = answerFor(task).complete ? "已完成 / Completed" : "";
   updateProgress();
+  applyVideoSettings();
 }
 
 function updateProgress() {
@@ -220,34 +305,31 @@ function updateProgress() {
 function navigate(delta) {
   collectCurrent();
   state.index = Math.max(0, Math.min(state.manifest.tasks.length - 1, state.index + delta));
+  state.action = "turn_left";
   render();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function nextIncomplete() {
-  collectCurrent();
+function nextIncomplete(collect = true) {
+  if (collect) collectCurrent();
   const tasks = state.manifest.tasks;
   for (let offset = 1; offset <= tasks.length; offset += 1) {
     const index = (state.index + offset) % tasks.length;
-    if (!state.answers[tasks[index].id]?.complete) { state.index = index; render(); return; }
+    if (!state.answers[tasks[index].id]?.complete) {
+      state.index = index;
+      state.action = "turn_left";
+      render();
+      return;
+    }
   }
-}
-
-function markComplete() {
-  collectCurrent();
-  if (!state.reviewerId.trim()) { byId("validation").textContent = "请填写审阅者 ID / Reviewer ID is required."; return; }
-  const task = state.manifest.tasks[state.index];
-  const missing = missingFields(task, answerFor(task));
-  if (missing.length) { byId("validation").textContent = `请补齐必填项 / Complete required fields: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "..." : ""}`; return; }
-  answerFor(task).complete = true;
-  save();
-  nextIncomplete();
+  render();
+  byId("validation").textContent = "全部面板已完成，请导出 JSON。";
 }
 
 function exportJson() {
   collectCurrent();
   const payload = {
-    schema_version: 1,
+    schema_version: 2,
     manifest_sha256: state.manifest.manifest_sha256,
     reviewer_id: state.reviewerId.trim(),
     exported_at: new Date().toISOString(),
@@ -263,11 +345,21 @@ function exportJson() {
 
 async function importJson(file) {
   const payload = JSON.parse(await file.text());
-  if (payload.manifest_sha256 !== state.manifest.manifest_sha256) throw new Error("Manifest hash 与当前审阅包不匹配 / Manifest hash does not match this review package.");
+  if (payload.manifest_sha256 !== state.manifest.manifest_sha256) throw new Error("Manifest hash 与当前审阅包不匹配。");
   state.reviewerId = payload.reviewer_id || "";
   state.answers = payload.answers || {};
   byId("reviewer-id").value = state.reviewerId;
-  save(); render();
+  save();
+  render();
+}
+
+function toggleFlag(index) {
+  const task = state.manifest.tasks[state.index];
+  if (task.kind !== "catastrophe" || index >= task.labels.length) return;
+  collectCurrent();
+  const item = itemFor(task, task.labels[index]);
+  item.flagged = !item.flagged;
+  render();
 }
 
 async function init() {
@@ -275,13 +367,19 @@ async function init() {
     if (!response.ok) throw new Error(`Manifest load failed: ${response.status}`);
     return response.json();
   });
+  if (state.manifest.schema_version !== 2) throw new Error("此页面需要 schema v2 审阅包，请重新生成 package。");
   loadSaved();
   byId("reviewer-id").value = state.reviewerId;
   byId("reviewer-id").addEventListener("input", (event) => { state.reviewerId = event.target.value; save(); });
   byId("prev").addEventListener("click", () => navigate(-1));
-  byId("previous-bottom").addEventListener("click", () => navigate(-1));
-  byId("next-incomplete").addEventListener("click", nextIncomplete);
-  byId("complete-next").addEventListener("click", markComplete);
+  byId("next-incomplete").addEventListener("click", () => nextIncomplete());
+  byId("quick-complete").addEventListener("click", completeQuick);
+  byId("detailed-complete").addEventListener("click", completeDetailed);
+  byId("sync-play").addEventListener("click", togglePlayback);
+  byId("speed").addEventListener("change", (event) => {
+    state.speed = Number(event.target.value);
+    videos().forEach((video) => { video.playbackRate = state.speed; });
+  });
   byId("export").addEventListener("click", exportJson);
   byId("import").addEventListener("change", async (event) => {
     try { await importJson(event.target.files[0]); } catch (error) { byId("validation").textContent = error.message; }
@@ -289,10 +387,23 @@ async function init() {
   byId("task-filter").addEventListener("change", (event) => {
     collectCurrent();
     const value = event.target.value;
-    const index = state.manifest.tasks.findIndex((task) => value === "all" || task.kind === value || (value === "incomplete" && !state.answers[task.id]?.complete));
-    if (index >= 0) { state.index = index; render(); }
+    const index = state.manifest.tasks.findIndex((task) =>
+      value === "all" || task.kind === value || (value === "incomplete" && !state.answers[task.id]?.complete)
+    );
+    if (index >= 0) { state.index = index; state.action = "turn_left"; render(); }
   });
-  document.addEventListener("change", collectCurrent);
+  document.addEventListener("change", (event) => {
+    if (event.target.matches("[data-flag]")) { collectCurrent(); render(); }
+    else collectCurrent();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.target.matches("input, textarea, select")) return;
+    if (event.code === "Space") { event.preventDefault(); togglePlayback(); }
+    else if (event.key.toLowerCase() === "n") completeQuick();
+    else if (event.key === "ArrowLeft") navigate(-1);
+    else if (event.key === "ArrowRight") nextIncomplete();
+    else if (/^[1-5]$/.test(event.key)) toggleFlag(Number(event.key) - 1);
+  });
   render();
 }
 
