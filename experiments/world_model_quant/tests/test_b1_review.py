@@ -98,8 +98,13 @@ def test_review_package_is_complete_and_public_manifest_is_anonymous(tmp_path):
     assert "steering_separation" in app_source
     assert "togglePlayback" in app_source
     assert "completeQuick" in app_source
+    assert "function assetUrl" in app_source
+    assert 'url.searchParams.set("token", token)' in app_source
+    assert "requireMediaReady" in app_source
     assert 'window.location.protocol === "file:"' in app_source
     assert "此源文件不能直接打开" in app_source
+    styles = (output / "public" / "styles.css").read_text(encoding="utf-8")
+    assert ".action-tabs[hidden]" in styles
 
 
 def test_review_package_refuses_to_overwrite_existing_package(tmp_path):

@@ -31,6 +31,7 @@ main { max-width: 1680px; margin: 0 auto; padding: 16px 20px 108px; }
 .rubric summary { cursor: pointer; font-weight: 650; }
 .rubric p { max-width: 920px; font-size: 13px; }
 .action-tabs { position: sticky; top: 82px; z-index: 7; display: flex; gap: 8px; padding: 10px 0; background: #f4f6f7; }
+.action-tabs[hidden] { display: none; }
 .action-tabs button.active { border-color: #21725f; background: #dcede7; color: #134b3f; font-weight: 750; }
 .video-panel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: start; }
 .video-card { min-width: 0; border: 1px solid #c8d0d4; border-radius: 7px; background: #fff; overflow: hidden; }

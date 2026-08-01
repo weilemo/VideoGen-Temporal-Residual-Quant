@@ -37,6 +37,13 @@ const state = {
 };
 const byId = (id) => document.getElementById(id);
 
+function assetUrl(path) {
+  const url = new URL(path, window.location.href);
+  const token = new URL(window.location.href).searchParams.get("token");
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -105,7 +112,7 @@ function renderCatastrophe(task) {
     const item = itemFor(task, label);
     return `<article class="video-card" data-label="${label}">
       <div class="card-title"><h2>${label}</h2><label class="flag-control"><input type="checkbox" data-flag ${item.flagged ? "checked" : ""}>可疑 / Flag</label></div>
-      <video controls preload="metadata" src="${task.media[label]}"></video>
+      <video controls preload="metadata" src="${escapeHtml(assetUrl(task.media[label]))}"></video>
       ${catastropheDetails(task, label)}
     </article>`;
   }).join("")}</div>`;
@@ -132,7 +139,7 @@ function renderAction(task) {
     const item = parent.actions[state.action] || {};
     return `<article class="video-card" data-label="${label}" data-action="${state.action}">
       <div class="card-title"><h2>${label}</h2><span>${actionLabels[state.action]}</span></div>
-      <video controls preload="metadata" src="${task.media[label][state.action]}"></video>
+      <video controls preload="metadata" src="${escapeHtml(assetUrl(task.media[label][state.action]))}"></video>
       <div class="field-grid compact">
         ${selectField("rating", "动作结果 / Result", [["", "请选择"], ["pass", "通过"], ["partial", "部分或迟到"], ["fail", "失败"], ["unclear", "不确定"]], item.rating)}
         ${selectField("onset", "响应开始 / Onset", [["", "请选择"], ["early", "前段"], ["middle", "中段"], ["late", "后段"], ["never", "未响应"]], item.onset)}
@@ -227,8 +234,15 @@ function requireReviewer() {
   return false;
 }
 
+function requireMediaReady() {
+  const clips = videos();
+  if (clips.length && clips.every((video) => video.readyState >= 1 && !video.error)) return true;
+  byId("validation").textContent = "视频尚未加载成功，不能提交本面板。请等待或刷新页面。";
+  return false;
+}
+
 function completeQuick() {
-  if (!requireReviewer()) return;
+  if (!requireReviewer() || !requireMediaReady()) return;
   const task = state.manifest.tasks[state.index];
   task.kind === "catastrophe" ? clearCatastrophe(task) : clearAction(task);
   answerFor(task).complete = true;
@@ -237,7 +251,7 @@ function completeQuick() {
 }
 
 function completeDetailed() {
-  if (!requireReviewer()) return;
+  if (!requireReviewer() || !requireMediaReady()) return;
   collectCurrent();
   const task = state.manifest.tasks[state.index];
   const error = validateDetailed(task);
@@ -257,7 +271,19 @@ function completeDetailed() {
 function videos() { return [...document.querySelectorAll("video")]; }
 
 function applyVideoSettings() {
-  videos().forEach((video) => { video.playbackRate = state.speed; });
+  const task = state.manifest.tasks[state.index];
+  videos().forEach((video) => {
+    video.playbackRate = state.speed;
+    video.addEventListener("error", () => {
+      const answer = answerFor(task);
+      if (answer.complete) {
+        answer.complete = false;
+        save();
+        updateProgress();
+      }
+      byId("validation").textContent = "视频加载失败，本面板已恢复为未完成。请刷新后重试。";
+    });
+  });
   videos().forEach((video) => video.addEventListener("seeking", () => {
     if (state.syncing) return;
     state.syncing = true;
@@ -363,7 +389,7 @@ function toggleFlag(index) {
 }
 
 async function init() {
-  state.manifest = await fetch("review_manifest.json", { cache: "no-store" }).then((response) => {
+  state.manifest = await fetch(assetUrl("review_manifest.json"), { cache: "no-store" }).then((response) => {
     if (!response.ok) throw new Error(`Manifest load failed: ${response.status}`);
     return response.json();
   });
