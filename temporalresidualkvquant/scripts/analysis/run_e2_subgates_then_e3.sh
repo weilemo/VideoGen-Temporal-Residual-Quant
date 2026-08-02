@@ -60,7 +60,9 @@ if (( codec_rc != 0 || offline_rc != 0 )); then
 fi
 
 run_attention_probe() {
-  local mode="$1" params="$2" output="${attention_root}/${mode}"
+  local mode="$1"
+  local params="$2"
+  local output="${attention_root}/${mode}"
   if [[ -f "${output}/probe.complete" ]]; then return 0; fi
   TRQ_QUANT_TYPE=s2pp-int4 TRQ_V_PREDICTOR_PARAMS_PATH="${params}" \
   PROMPTS_PATH="${prompts}" PROMPT_INDICES=0 NUM_OUTPUT_FRAMES=48 LOCAL_ATTN_SIZE=180 \

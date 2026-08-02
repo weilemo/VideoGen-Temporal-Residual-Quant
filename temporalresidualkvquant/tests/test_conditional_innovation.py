@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest import TestCase
 
 import torch
@@ -13,6 +14,20 @@ from trq.analysis.conditional_innovation import (
 
 
 class ConditionalInnovationTests(TestCase):
+    def test_e2_launcher_initializes_mode_before_derived_output(self):
+        trq_root = Path(__file__).resolve().parents[1]
+        launcher = (
+            trq_root / "scripts" / "analysis" / "run_e2_subgates_then_e3.sh"
+        ).read_text(encoding="utf-8")
+        function_body = launcher.split("run_attention_probe() {", 1)[1].split(
+            "\n}", 1
+        )[0]
+        lines = [line.strip() for line in function_body.splitlines() if line.strip()]
+
+        mode_index = lines.index('local mode="$1"')
+        output_index = lines.index('local output="${attention_root}/${mode}"')
+        self.assertLess(mode_index, output_index)
+
     def test_frozen_cross_then_gamma_recovers_synthetic_structure(self):
         unit_size = 8
         cross_accumulator = CrossKVAccumulator(num_heads=2, head_dim=3)
