@@ -73,6 +73,41 @@ B1 两条基线合计新增 220 个对比视频，另有 22 个 LongCat BF16 pre
 基础上合计新增 960 个对比视频，另有 96 个 prefix。B1 通过人工灾难门后再启动 B2，
 不把 MovieGen1003 作为默认队列。
 
+### 2026-08-03 MovieGen128 执行授权
+
+用户已明确要求先完成 Causal Forcing 与 LongCat 的 MovieGen128 生成和自动评测。该授权
+改变 B2 的执行顺序，但不取消人工 catastrophe、LongCat 分段漂移和跨 seed 的科学门；
+自动流水线完成后仍不能直接声称视觉无损。
+
+B2 使用 `moviegenbench_resume_128.txt`：前 32 条逐字继承已经运行的规范列表，后 96 条
+来自 MovieGen128 原列表。两个 GPU 先并行生成 Causal 的互斥 index shard，再并行生成
+LongCat；现有可解码输出按同一 `RUN_ID` 自动跳过：
+
+```bash
+GPU_A=6 GPU_B=7 \
+RUN_ID=b2_moviegen128_20260803 \
+MIN_FREE_GB=100 \
+  bash experiments/world_model_quant/run_expansion_b2_moviegen128.sh
+```
+
+正式运行前必须先用 `DRY_RUN=1` 检查当前租约、GPU 映射和分片。默认 shard 为 32-79
+与 80-127，禁止两个 lane 写同一 index。完成后用 B1 的规范化 MovieGen32 index root 和
+B2 新结果根构造 MovieGen128 只读视图并运行两卡评测：
+
+```bash
+CAUSAL_GPU=6 LONGCAT_GPU=7 \
+CAUSAL_B1_ROOT=/path/to/b1/index/causal_forcing \
+CAUSAL_B2_ROOT=results/world_model_quant/causal_forcing/b2_moviegen128_20260803 \
+LONGCAT_B1_ROOT=/path/to/b1/index/longcat \
+LONGCAT_B2_ROOT=results/world_model_quant/longcat/b2_moviegen128_20260803 \
+RUN_ID=b2_moviegen128_20260803 \
+  bash experiments/world_model_quant/run_b2_moviegen128_evaluation.sh
+```
+
+生成完成门为 Causal 新增 `96 x 5 = 480` 条、LongCat 新增 96 个 prefix 与
+`96 x 5 = 480` 条 continuation，全部通过 `ffprobe`。统一索引最终应包含 Causal 640
+条和 LongCat 768 条记录。进程 exit 0、`.done` 或 VBench-derived 聚合均不能替代人工门。
+
 每个阶段同时报告全部样本和 MovieGen motion/concept tag 子组。主统计单位是 prompt，
 使用 paired bootstrap 95% CI、配对胜率、中位数和 IQR；不能把视频帧当作独立样本来
 虚增显著性。INT2 是确认性比较，INT4 保持探索性并完整报告，不依据单一指标挑选结果。

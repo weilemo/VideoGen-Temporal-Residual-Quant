@@ -25,12 +25,20 @@ assert CAUSAL_SPEC.loader is not None
 CAUSAL_SPEC.loader.exec_module(causal_prepare)
 
 MANIFEST_SPEC = importlib.util.spec_from_file_location(
-    "prepare_moviegen32_manifest", ROOT / "prepare_moviegen32_manifest.py"
+    "prepare_moviegen_manifest", ROOT / "prepare_moviegen_manifest.py"
 )
 moviegen_manifest = importlib.util.module_from_spec(MANIFEST_SPEC)
 sys.modules[MANIFEST_SPEC.name] = moviegen_manifest
 assert MANIFEST_SPEC.loader is not None
 MANIFEST_SPEC.loader.exec_module(moviegen_manifest)
+
+PROMPT_SPEC = importlib.util.spec_from_file_location(
+    "validate_moviegen_prompts", ROOT / "validate_moviegen_prompts.py"
+)
+prompt_validator = importlib.util.module_from_spec(PROMPT_SPEC)
+sys.modules[PROMPT_SPEC.name] = prompt_validator
+assert PROMPT_SPEC.loader is not None
+PROMPT_SPEC.loader.exec_module(prompt_validator)
 
 PAIRED_SPEC = importlib.util.spec_from_file_location(
     "run_forcing_paired_metrics",
@@ -247,6 +255,32 @@ def test_moviegen_manifest_merges_split_causal_roots(tmp_path):
     assert {record["source_label"] for record in records[10:]} == {"b1"}
 
 
+def test_moviegen_manifest_accepts_normalized_b1_and_native_b2_causal_names(tmp_path):
+    prompts = ["legacy prompt", "new prompt"]
+    roots = [("b1", tmp_path / "b1"), ("b2", tmp_path / "b2")]
+    for variant in moviegen_manifest.VARIANTS:
+        b1_dir = roots[0][1] / variant
+        b2_dir = roots[1][1] / variant
+        b1_dir.mkdir(parents=True, exist_ok=True)
+        b2_dir.mkdir(parents=True, exist_ok=True)
+        (b1_dir / "0-0.mp4").write_bytes(f"b1-{variant}".encode())
+        (b2_dir / moviegen_manifest.source_name("causal_forcing", prompts[1], 1)).write_bytes(
+            f"b2-{variant}".encode()
+        )
+
+    records = moviegen_manifest.build_records(
+        baseline="causal_forcing",
+        roots=roots,
+        prompts=prompts,
+        ffprobe_bin="ffprobe",
+        check_decode=False,
+    )
+
+    assert len(records) == 10
+    assert {record["source_label"] for record in records[:5]} == {"b1"}
+    assert {record["source_label"] for record in records[5:]} == {"b2"}
+
+
 def test_moviegen_manifest_rejects_ambiguous_duplicate(tmp_path):
     prompt = "duplicate scene"
     roots = [("legacy", tmp_path / "legacy"), ("b1", tmp_path / "b1")]
@@ -264,6 +298,87 @@ def test_moviegen_manifest_rejects_ambiguous_duplicate(tmp_path):
         assert "ambiguous duplicate" in str(exc)
     else:
         raise AssertionError("duplicate result roots must fail closed")
+
+
+def test_moviegen128_prompt_superset_preserves_b1_prefix():
+    prompts = ROOT.parent.parent / "temporalresidualkvquant/assets/moviegenbench_resume_128.txt"
+    prefix = ROOT.parent.parent / "temporalresidualkvquant/assets/moviegenbench_resume_32.txt"
+
+    result = prompt_validator.validate(
+        prompts,
+        expected=128,
+        prefix_path=prefix,
+        prefix_count=32,
+    )
+
+    assert result["count"] == 128
+    assert result["prefix_count"] == 32
+    assert result["causal_filename_collisions"] == 0
+    assert len(result["sha256"]) == 64
+
+
+def test_moviegen_prompt_validator_rejects_causal_filename_collision(tmp_path):
+    prompts = tmp_path / "prompts.txt"
+    shared = "x" * 100
+    prompts.write_text(f"{shared} first\n{shared} second\n", encoding="utf-8")
+
+    try:
+        prompt_validator.validate(prompts, expected=2)
+    except ValueError as exc:
+        assert "filename collision" in str(exc)
+    else:
+        raise AssertionError("Causal filename collisions must fail closed")
+
+
+def test_expansion_b2_dry_run_uses_two_disjoint_shards(tmp_path):
+    result = subprocess.run(
+        ["bash", str(ROOT / "run_expansion_b2_moviegen128.sh")],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "DRY_RUN": "1",
+            "HOME": str(tmp_path),
+            "GPU_A": "2",
+            "GPU_B": "4",
+            "RUN_ID": "b2-test",
+        },
+    )
+
+    assert "Phase A Causal: GPU 2 indices 32-79" in result.stdout
+    assert "GPU 4 indices 80-127" in result.stdout
+    assert "Phase B LongCat" in result.stdout
+    assert "Existing decodable outputs" in result.stdout
+    assert "No GPU commands executed" in result.stdout
+
+
+def test_b2_evaluation_dry_run_requires_128_prompts_and_two_gpus(tmp_path):
+    roots = [tmp_path / name for name in ("causal_b1", "causal_b2", "longcat_b1", "longcat_b2")]
+    for root in roots:
+        root.mkdir()
+    result = subprocess.run(
+        ["bash", str(ROOT / "run_b2_moviegen128_evaluation.sh")],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "DRY_RUN": "1",
+            "HOME": str(tmp_path),
+            "CAUSAL_GPU": "2",
+            "LONGCAT_GPU": "4",
+            "CAUSAL_B1_ROOT": str(roots[0]),
+            "CAUSAL_B2_ROOT": str(roots[1]),
+            "LONGCAT_B1_ROOT": str(roots[2]),
+            "LONGCAT_B2_ROOT": str(roots[3]),
+        },
+    )
+
+    assert "GPU 2: Causal MovieGen128" in result.stdout
+    assert "GPU 4: LongCat MovieGen128" in result.stdout
+    assert "EXPECTED_PROMPTS=128" in result.stdout
+    assert "No manifests, metrics, or GPU jobs were started" in result.stdout
 
 
 def test_paired_bootstrap_reports_positive_trq_advantage():
