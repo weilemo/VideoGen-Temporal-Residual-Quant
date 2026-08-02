@@ -17,8 +17,8 @@ shard_a_count="${SHARD_A_COUNT:-48}"
 causal_frames="${CAUSAL_FRAMES:-84}"
 dry_run="${DRY_RUN:-0}"
 min_free_gb="${MIN_FREE_GB:-100}"
-status_root="${REPO_ROOT}/results/world_model_quant/orchestration/${run_id}_generation"
-log_root="${REPO_ROOT}/results/world_model_quant/logs/${run_id}/orchestrator"
+status_root="${WORLD_MODEL_RESULTS_ROOT}/orchestration/${run_id}_generation"
+log_root="${WORLD_MODEL_RESULTS_ROOT}/logs/${run_id}/orchestrator"
 
 [[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid RUN_ID: ${run_id}" >&2; exit 2; }
 [[ "${gpu_a}" != "${gpu_b}" ]] || { echo "GPU_A and GPU_B must differ" >&2; exit 2; }
@@ -52,6 +52,7 @@ Phase B LongCat: GPU ${gpu_a} indices ${start_index}-$((shard_b_start - 1)); GPU
 Five variants: ${VARIANTS[*]}
 CAUSAL_FRAMES=${causal_frames}
 MIN_FREE_GB=${min_free_gb}
+WORLD_MODEL_RESULTS_ROOT=${WORLD_MODEL_RESULTS_ROOT}
 Existing decodable outputs in this RUN_ID are reused.
 No GPU commands executed.
 EOF
@@ -59,7 +60,7 @@ EOF
 fi
 
 if [[ "${mode}" == orchestrator ]]; then
-  free_kb="$(df -Pk "${REPO_ROOT}" | awk 'NR == 2 {print $4}')"
+  free_kb="$(df -Pk "${WORLD_MODEL_RESULTS_ROOT}" | awk 'NR == 2 {print $4}')"
   required_kb=$((min_free_gb * 1024 * 1024))
   [[ "${free_kb}" -ge "${required_kb}" ]] || {
     echo "insufficient free space: need at least ${min_free_gb} GiB" >&2
@@ -128,11 +129,12 @@ run_lane() {
   local shard_count="$4"
   local name="${baseline}_${shard_start}_$((shard_start + shard_count - 1))"
   local result_root
-  result_root="${REPO_ROOT}/results/world_model_quant/${baseline}/${run_id}"
-  [[ "${baseline}" != longcat ]] || result_root="${REPO_ROOT}/results/world_model_quant/longcat/${run_id}"
+  result_root="${WORLD_MODEL_RESULTS_ROOT}/${baseline}/${run_id}"
+  [[ "${baseline}" != longcat ]] || result_root="${WORLD_MODEL_RESULTS_ROOT}/longcat/${run_id}"
 
   if ! record_stage "${name}" env \
     RUN_ID="${run_id}" GPU="${lane_gpu}" PROMPTS_SOURCE="${prompts_source}" \
+    WORLD_MODEL_RESULTS_ROOT="${WORLD_MODEL_RESULTS_ROOT}" \
     START_INDEX="${shard_start}" LIMIT="${shard_count}" CAUSAL_FRAMES="${causal_frames}" \
     bash "${script_dir}/run_generation.sh" "${baseline}" full; then
     return 1
@@ -173,11 +175,13 @@ run_phase() {
   local phase_a phase_b
   setsid env GPU_A="${gpu_a}" GPU_B="${gpu_b}" RUN_ID="${run_id}" \
     PROMPTS_SOURCE="${prompts_source}" PREFIX_SOURCE="${prefix_source}" \
+    WORLD_MODEL_RESULTS_ROOT="${WORLD_MODEL_RESULTS_ROOT}" \
     CAUSAL_FRAMES="${causal_frames}" MIN_FREE_GB="${min_free_gb}" \
     bash "${BASH_SOURCE[0]}" lane "${baseline}" "${gpu_a}" "${start_index}" "${shard_a_count}" &
   lane_a_pid=$!
   setsid env GPU_A="${gpu_a}" GPU_B="${gpu_b}" RUN_ID="${run_id}" \
     PROMPTS_SOURCE="${prompts_source}" PREFIX_SOURCE="${prefix_source}" \
+    WORLD_MODEL_RESULTS_ROOT="${WORLD_MODEL_RESULTS_ROOT}" \
     CAUSAL_FRAMES="${causal_frames}" MIN_FREE_GB="${min_free_gb}" \
     bash "${BASH_SOURCE[0]}" lane "${baseline}" "${gpu_b}" "${shard_b_start}" "${shard_b_count}" &
   lane_b_pid=$!

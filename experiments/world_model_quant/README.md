@@ -90,6 +90,16 @@ MIN_FREE_GB=100 \
   bash experiments/world_model_quant/run_expansion_b2_moviegen128.sh
 ```
 
+如果代码库所在文件系统空间不足，可显式设置 `WORLD_MODEL_RESULTS_ROOT`。生成视频、prompt
+切片、日志、编排状态、统一索引和自动评测结果都会写入该根目录；代码与模型权重位置不变。
+替代目录必须位于已核对容量和生命周期的挂载点，不能静默降级到 `/dev/shm`：
+
+```bash
+WORLD_MODEL_RESULTS_ROOT=/var/tmp/moweile-20260612/world_model_quant \
+GPU_A=6 GPU_B=7 RUN_ID=b2_moviegen128_20260803 MIN_FREE_GB=100 \
+  bash experiments/world_model_quant/run_expansion_b2_moviegen128.sh
+```
+
 正式运行前必须先用 `DRY_RUN=1` 检查当前租约、GPU 映射和分片。默认 shard 为 32-79
 与 80-127，禁止两个 lane 写同一 index。完成后用 B1 的规范化 MovieGen32 index root 和
 B2 新结果根构造 MovieGen128 只读视图并运行两卡评测：

@@ -4,7 +4,8 @@ set -euo pipefail
 
 WORLD_MODEL_EXPERIMENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${WORLD_MODEL_EXPERIMENT_DIR}/../.." && pwd)"
-readonly WORLD_MODEL_EXPERIMENT_DIR REPO_ROOT
+WORLD_MODEL_RESULTS_ROOT="${WORLD_MODEL_RESULTS_ROOT:-${REPO_ROOT}/results/world_model_quant}"
+readonly WORLD_MODEL_EXPERIMENT_DIR REPO_ROOT WORLD_MODEL_RESULTS_ROOT
 
 VARIANTS=(bf16 trq_int4 trq_int2 naive_int4 naive_int2)
 readonly VARIANTS
@@ -66,7 +67,7 @@ prepare_prompt_slice() {
   local start="$2"
   local name="$3"
   local source="${PROMPTS_SOURCE:-${REPO_ROOT}/integrations/evaluation/moviegen10.txt}"
-  local destination="${REPO_ROOT}/results/world_model_quant/inputs/${name}.txt"
+  local destination="${WORLD_MODEL_RESULTS_ROOT}/inputs/${name}.txt"
   local first=$((start + 1))
   local last=$((start + count))
 
@@ -92,7 +93,7 @@ prepare_missing_causal_prompts() {
   local count="$2"
   local name="$3"
   local output_dir="$4"
-  local destination="${REPO_ROOT}/results/world_model_quant/inputs/${name}.txt"
+  local destination="${WORLD_MODEL_RESULTS_ROOT}/inputs/${name}.txt"
   python "${WORLD_MODEL_EXPERIMENT_DIR}/prepare_causal_prompts.py" \
     --prompts "${PROMPTS_SOURCE:-${REPO_ROOT}/integrations/evaluation/moviegen10.txt}" \
     --start "${start}" \

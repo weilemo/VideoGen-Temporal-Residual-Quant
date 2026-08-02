@@ -331,6 +331,7 @@ def test_moviegen_prompt_validator_rejects_causal_filename_collision(tmp_path):
 
 
 def test_expansion_b2_dry_run_uses_two_disjoint_shards(tmp_path):
+    results_root = tmp_path / "local-results"
     result = subprocess.run(
         ["bash", str(ROOT / "run_expansion_b2_moviegen128.sh")],
         check=True,
@@ -343,6 +344,7 @@ def test_expansion_b2_dry_run_uses_two_disjoint_shards(tmp_path):
             "GPU_A": "2",
             "GPU_B": "4",
             "RUN_ID": "b2-test",
+            "WORLD_MODEL_RESULTS_ROOT": str(results_root),
         },
     )
 
@@ -350,6 +352,7 @@ def test_expansion_b2_dry_run_uses_two_disjoint_shards(tmp_path):
     assert "GPU 4 indices 80-127" in result.stdout
     assert "Phase B LongCat" in result.stdout
     assert "Existing decodable outputs" in result.stdout
+    assert f"WORLD_MODEL_RESULTS_ROOT={results_root}" in result.stdout
     assert "No GPU commands executed" in result.stdout
 
 

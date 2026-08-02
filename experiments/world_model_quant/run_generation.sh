@@ -25,12 +25,12 @@ run_id="${RUN_ID:-${stage}}"
 }
 export CUDA_VISIBLE_DEVICES="${gpu}"
 
-log_root="${REPO_ROOT}/results/world_model_quant/logs/${run_id}"
+log_root="${WORLD_MODEL_RESULTS_ROOT}/logs/${run_id}"
 mkdir -p "${log_root}"
 
 case "${baseline}" in
   causal_forcing)
-    output_root="${REPO_ROOT}/results/world_model_quant/causal_forcing/${run_id}"
+    output_root="${WORLD_MODEL_RESULTS_ROOT}/causal_forcing/${run_id}"
     for variant in "${VARIANTS[@]}"; do
       prompts="$(prepare_missing_causal_prompts \
         "${start_index}" "${limit}" \
@@ -49,7 +49,7 @@ case "${baseline}" in
     done
     ;;
   longcat)
-    output_root="${REPO_ROOT}/results/world_model_quant/longcat/${run_id}"
+    output_root="${WORLD_MODEL_RESULTS_ROOT}/longcat/${run_id}"
     PROMPTS="${PROMPTS_SOURCE:-${REPO_ROOT}/integrations/evaluation/moviegen10.txt}" \
       LIMIT="${limit}" START_INDEX="${start_index}" OUTPUT_ROOT="${output_root}" \
       bash "${REPO_ROOT}/integrations/longcat_video/run_moviegen10.sh" bf16 prefix \

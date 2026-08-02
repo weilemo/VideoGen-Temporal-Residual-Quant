@@ -13,9 +13,9 @@ causal_b1="${CAUSAL_B1_ROOT:?Set CAUSAL_B1_ROOT to the validated MovieGen32 Caus
 causal_b2="${CAUSAL_B2_ROOT:?Set CAUSAL_B2_ROOT to the B2 Causal result root}"
 longcat_b1="${LONGCAT_B1_ROOT:?Set LONGCAT_B1_ROOT to the validated MovieGen32 LongCat index root}"
 longcat_b2="${LONGCAT_B2_ROOT:?Set LONGCAT_B2_ROOT to the B2 LongCat result root}"
-index_root="${INDEX_ROOT:-${REPO_ROOT}/results/world_model_quant/indexes/${run_id}}"
-eval_root="${EVAL_ROOT:-${REPO_ROOT}/results/world_model_quant/evaluation/${run_id}}"
-status_root="${REPO_ROOT}/results/world_model_quant/orchestration/${run_id}_evaluation"
+index_root="${INDEX_ROOT:-${WORLD_MODEL_RESULTS_ROOT}/indexes/${run_id}}"
+eval_root="${EVAL_ROOT:-${WORLD_MODEL_RESULTS_ROOT}/evaluation/${run_id}}"
+status_root="${WORLD_MODEL_RESULTS_ROOT}/orchestration/${run_id}_evaluation"
 run_vbench="${RUN_VBENCH:-1}"
 dry_run="${DRY_RUN:-0}"
 
@@ -38,6 +38,7 @@ EXPECTED_PROMPTS=128
 RUN_VBENCH=${run_vbench}
 INDEX_ROOT=${index_root}
 EVAL_ROOT=${eval_root}
+WORLD_MODEL_RESULTS_ROOT=${WORLD_MODEL_RESULTS_ROOT}
 No manifests, metrics, or GPU jobs were started.
 EOF
   exit 0
