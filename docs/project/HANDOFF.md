@@ -28,10 +28,11 @@ cd /Users/moweile/Obsidian/Knowledge/Research/project/longvideo-kvcache-quant/co
     22 个 BF16 prefix 与五档各 22 条 continuation；HY-WAN holdout 新增 100 条；
   - LongCat 六个扩展目录均为 `22/22, bad=0`，双 GPU lane 均 exit 0；已有视频由
     可解码检查跳过，没有重复生成；
-  - Causal 的 `failed:validation` 是旧 10 条与新增 22 条分处不同 worktree 导致的索引
-    缺口，不是生成失败。下一步先建立跨结果根的 MovieGen32 manifest；
-  - 当前只完成 B1 **远端生成**，尚未完成 32 条扩展集的统一指标、人工盲审、跨 seed
-    统计或正式 VBench 验收；这些完成前不启动 B2 MovieGen128；
+  - Causal 的旧 10 条与新增 22 条已通过主仓库统一 MovieGen32 manifest 收口；历史
+    `failed:validation` 是索引缺口，不是生成失败；
+  - B1 自动评测和工程 provenance 已完成：统一 release 收录 452 个视频和 211 个
+    评测/状态工件，SHA-256 回读全部通过；当前缺口仅保留人工盲审、长时分段分析和
+    跨 seed 证据，这些完成前不启动 B2 MovieGen128；
   - 本地推送后，远端只运行一次 `pull_remote_once.sh`，不启动同步轮询。
 
 - 2026-07-20 在线分叉计划已实现于 `codex/trq-online-causal-gates`：
@@ -68,22 +69,27 @@ cd /Users/moweile/Obsidian/Knowledge/Research/project/longvideo-kvcache-quant/co
 ## 下一位 agent 先做什么
 
 1. 先读 `docs/project/STATUS.md` 和 `experiments/world_model_quant/README.md`。
-2. 不再启动 Expansion B1 生成；先定位旧 MovieGen10 与新增 22 条结果根，生成 Causal
-   与 LongCat 的 MovieGen32 统一 manifest，并逐项做 `ffprobe` 完整性检查。
-3. 对统一索引运行 PSNR、SSIM、LPIPS、八维 VBench-derived、prompt-level bootstrap
-   95% CI 和逐 prompt 表；LongCat 保持跳过 13 个共享 conditioning frames。
-4. 完成 Causal/LongCat failure tags、长时分段漂移和 HY holdout action/感知盲审。
-5. 只有 B1 没有 TRQ-only catastrophe 且 INT2 效应方向未反转，才向用户申请启动 B2
+2. Cross-KV Smoke4 已自动 No-Go，不得启动 MB32。先在 CPU-only code-server 用现有 raw
+   BF16 dumps 运行 `scripts/analysis/run_conditional_increment.sh`，检验 K 在历史 V 之外的
+   partial R2，以及 wrong-space、wrong-time、wrong-prompt 三个 matched controls。
+3. 结构 Gate 即使通过也只授权修复 first-boundary K parity 和 actual-byte accounting，
+   不直接授权在线扩展；失败则把 K-to-V 降级为 marginal correlation ablation。
+4. 不再启动或重跑 Expansion B1；从统一 release manifest 读取自动指标与 provenance，
+   不直接扫描旧 run worktree。
+5. 完成 Causal/LongCat failure tags、LongCat 长时分段漂移和 HY holdout action/感知盲审，
+   并补齐跨 seed 证据。
+6. 只有 B1 没有 TRQ-only catastrophe 且 INT2 效应方向未反转，才向用户申请启动 B2
    MovieGen128；不得根据生成 `done` 自动放行。
-6. Self-Forcing 的独立阻塞仍是 K4V4 contact sheet / catastrophe gate；该门通过前不启动
+7. Self-Forcing 的独立阻塞仍是 K4V4 contact sheet / catastrophe gate；该门通过前不启动
    501/699-frame rollout。
-7. 如涉及新 CUDA 任务，先重新核对当前 EPIC 租约与物理/逻辑 GPU 映射；旧 GPU 编号
+8. 如涉及新 CUDA 任务，先重新核对当前 EPIC 租约与物理/逻辑 GPU 映射；旧 GPU 编号
    和旧 hostname 只能作为历史证据。
 
-当前 B1 自动评测入口为 `experiments/world_model_quant/run_b1_evaluation.sh`。它要求显式
-提供 Causal/LongCat 的 legacy 与 B1 结果根，以及 HY holdout 根；默认分配 GPU 6/7，
-但启动前仍必须重新执行 `nvidia-smi` 并核对租约。索引器
-`prepare_moviegen32_manifest.py` 会在任何 GPU 工作前 fail closed，因此不要用手工复制
+当前 B1 自动评测入口为 `experiments/world_model_quant/run_b1_evaluation.sh`。只有重建
+统一 manifest 时，索引器 `prepare_moviegen32_manifest.py` 才要求显式提供 Causal/LongCat
+的 legacy 与 B1 结果根，以及 HY holdout 根；下游评测与结果消费只读取统一 manifest，
+不直接扫描旧 run worktree。重建评测默认分配 GPU 6/7，但启动前仍必须重新执行
+`nvidia-smi` 并核对租约；索引器会在任何 GPU 工作前 fail closed，因此不要用手工复制
 视频绕过重复或缺失检查。
 
 ## 当前最重要信息

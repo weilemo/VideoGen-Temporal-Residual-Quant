@@ -7,7 +7,20 @@
 
 ## 正在做什么
 
-- **三基线 MovieGen10 自动评测完成，Expansion B1 生成完成（2026-07-28）**：
+- **Cross-KV Smoke4 自动 No-Go，转入条件增量结构检验（2026-08-05）**：
+  - BF16、Temporal-only S2++、Cross-only 的 4 prompts x 2 seeds 已完成，共 24 个视频，
+    生成实测约 3.6 GPU-hours；自动 Gate 为 `FAIL_SMOKE_AUTOMATIC`，不得进入 MB32；
+  - Cross/Temporal 的 V read relative-L2 中位比为 0.7371，attention-output 比为
+    0.9179，但 latent 比为 1.0090、仅 4/8 改善；first-boundary K parity、actual bytes
+    和 runtime Gate 均失败，人工标签仍为空；
+  - 旧结果只能支持局部 V/attention-output error 降低，不能支持更好的端到端 quantizer；
+  - 新增纯 CPU `scripts/analysis/run_conditional_increment.sh`：以历史同索引 V 为强基线，
+    检验当前同 token K 的 held-out partial R2，并加入等容量 wrong-space、wrong-time、
+    wrong-prompt 对照；结构 Gate 通过也只授权修复 parity/bytes 后的新小规模在线设计；
+  - 本地 shell syntax、Python compile、合成 CLI 和完整 84 项 CPU tests 已通过；远端 raw
+    BF16 dumps 分析尚未执行，不能提前写结构结论。
+
+- **三基线 MovieGen10 与 Expansion B1 自动评测完成（2026-07-29）**：
   - 五档精度统一为 BF16、TRQ INT4/INT2、packed-naive INT4/INT2；LongCat 配对指标
     跳过 13 个共享 conditioning frames；
   - MovieGen10 / HY dev 的 PSNR、SSIM、LPIPS、八维 VBench-derived 汇总和 HY action
@@ -20,11 +33,12 @@
   - 2026-07-28 完整性门确认上述扩展输出全部存在且可解码。LongCat 最后阶段拆为两张
     A100 的互斥索引 shard，两个 lane 均 exit 0，六个目录均为 `22/22, bad=0`；
   - Causal 曾显示 `failed:validation`，根因是旧 MovieGen10 与新增 22 条分处不同结果
-    worktree，当前 checkout 的验证器只看见 22/32；生成本身 exit 0。统一评测前必须先
-    建立跨结果根的 32 条索引，不能重跑或把该状态解释成模型失败；
-  - **当前接力点**：不再生成 B1 视频；先统一 Causal/LongCat MovieGen32 索引，计算扩展
-    集 PSNR、SSIM、LPIPS、VBench-derived、prompt-level bootstrap CI 和人工 failure tags。
-    完成 B1 人工门前不启动 B2 MovieGen128；
+    worktree，当前 checkout 的验证器只看见 22/32；生成本身 exit 0。该缺口已由跨结果根
+    的 32 条统一索引收口，不能重跑或把历史状态解释成模型失败；
+  - Causal/LongCat MovieGen32 与 HY holdout 自动评测已完成；统一 release 收录 452 个
+    视频和 211 个评测/状态工件，SHA-256 回读全部通过，JSON 均可解析且数值有限；
+  - **当前接力点**：只做 B1 人工 failure tags、LongCat 分段漂移、HY action/感知盲审
+    和跨 seed 解释。完成 B1 人工门前不启动 B2 MovieGen128；
   - 远端代码同步继续使用 GitHub commit 后的一次性 fast-forward pull，不做远端轮询。
 
 - **仓库所有权边界已整理（2026-07-24）**：
@@ -214,9 +228,10 @@
 
 ## 当前阻塞 / 未完成
 
-- Expansion B1 只有生成与可解码门完成；MovieGen32 / HY holdout 的统一指标、provenance、
-  prompt-level CI、人工 failure tags 和跨 seed 证据尚未完成；
-- Causal 的旧 10 条与新增 22 条分处不同结果 worktree，必须先构造统一 manifest；
+- K-to-V 新结构 Gate 尚未在远端 raw BF16 calibration/validation dumps 上运行；运行前先
+  审计 dump 的 unit size、prompt-disjoint split、层覆盖和逐 token 对齐，CPU 结果不授权 MB32；
+- Expansion B1 的生成、统一自动指标、prompt-level CI 与工程 provenance 已完成；尚缺
+  人工 failure tags、LongCat 分段漂移、HY action/感知盲审和跨 seed 证据；
 - Self-Forcing E1 自动指标已完成，但 K4V4 人工 catastrophe gate 仍未完成；该门通过前
   不启动 501/699-frame rollout；
 - E2/E3 只有代码与 CPU/dry-run 证据；E4 不能在没有 E2/E3 和人工门的情况下预选 winner；
@@ -226,10 +241,11 @@
 
 ## 下一步
 
-1. 建立 Causal/LongCat MovieGen32 统一结果索引并验证 32 条 x 5 modes 的对应关系；
-2. 运行扩展集 PSNR、SSIM、LPIPS、VBench-derived、bootstrap CI 与长时分段指标；
-3. 完成 B1 与 HY holdout 的人工 catastrophe/action review；
-4. 将自动指标、人工标签、actual KV bytes、peak memory 和 latency 整合为按 baseline 的
+1. 在当前 CPU-only code-server 审计并运行 K-to-V conditional-increment 结构 Gate；
+2. 根据 partial R2 与三个 matched controls 决定停止 K-to-V，或只授权修复 parity/bytes；
+3. 完成 Causal/LongCat 逐 prompt failure tags 和 LongCat 长时分段漂移审阅；
+4. 完成 HY holdout 的 action/感知盲审，并补齐跨 seed 证据；
+5. 将自动指标、人工标签、actual KV bytes、peak memory 和 latency 整合为按 baseline 的
    BF16 delta 表；
-5. 依据预注册门决定 B2 MovieGen128 是否获准，不因样本已生成而默认继续扩张；
-6. 并行完成 Self-Forcing K4V4 人工 gate，之后再决定 E2/E3、E5 或 K-predicts-V。
+6. 依据预注册门决定 B2 MovieGen128 是否获准，不因样本已生成而默认继续扩张；
+7. 并行完成 Self-Forcing K4V4 人工 gate，之后再决定 E2/E3 或 E5。
