@@ -72,12 +72,16 @@ class ConditionalIncrementTests(TestCase):
             calibration.mkdir()
             validation.mkdir()
             for split, seeds in ((calibration, (1, 2)), (validation, (11, 12))):
-                for seed in seeds:
+                for sample_index, seed in enumerate(seeds):
                     key, value = self._sequence(seed, unit_size=7)
                     torch.save(
                         {
                             "format": "hwq_kv_tensors",
-                            "metadata": {"prompt_id": f"{split.name}-{seed}", "frame_seq_length": 7},
+                            "metadata": {
+                                "sample_id": f"kv_cache_frames180_{sample_index:04d}",
+                                "text_prompts": [f"{split.name} prompt {seed}"],
+                                "frame_seq_length": 7,
+                            },
                             "layers": {0: {"k": key, "v": value}},
                         },
                         split / f"prompt_{seed}.pt",
@@ -110,6 +114,61 @@ class ConditionalIncrementTests(TestCase):
             summary = json.loads((output / "summary.json").read_text())
             self.assertIn(summary["status"], ("PASS_STRUCTURE_GATE", "FAIL_STRUCTURE_GATE"))
             self.assertEqual(len((output / "prompt_rows.csv").read_text().splitlines()), 3)
+
+    def test_cli_rejects_same_prompt_text_with_different_sample_ids(self):
+        trq_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calibration = root / "calibration"
+            validation = root / "validation"
+            output = root / "output"
+            calibration.mkdir()
+            validation.mkdir()
+            split_specs = (
+                (calibration, ((1, "shared prompt"), (2, "calibration only"))),
+                (validation, ((11, "shared prompt"), (12, "validation only"))),
+            )
+            for split, samples in split_specs:
+                for sample_index, (seed, prompt) in enumerate(samples):
+                    key, value = self._sequence(seed, unit_size=7)
+                    torch.save(
+                        {
+                            "format": "hwq_kv_tensors",
+                            "metadata": {
+                                "sample_id": f"{split.name}_{sample_index:04d}",
+                                "text_prompts": [prompt],
+                                "frame_seq_length": 7,
+                            },
+                            "layers": {0: {"k": key, "v": value}},
+                        },
+                        split / f"prompt_{seed}.pt",
+                    )
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(trq_root / "src")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(trq_root / "scripts" / "analysis" / "analyze_conditional_increment.py"),
+                    "--calibration-dumps",
+                    str(calibration / "*.pt"),
+                    "--validation-dumps",
+                    str(validation / "*.pt"),
+                    "--output-dir",
+                    str(output),
+                    "--layers",
+                    "0",
+                    "--unit-size",
+                    "7",
+                    "--bootstrap-resamples",
+                    "10",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("prompt identities overlap", result.stderr)
 
     @staticmethod
     def _sequence(seed: int, unit_size: int) -> tuple[torch.Tensor, torch.Tensor]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import re
 import subprocess
@@ -279,6 +280,22 @@ def _unit_size(requested: int, metadata: dict[str, Any]) -> int:
 def _prompt_id(path: Path, metadata: dict[str, Any]) -> str:
     dump_metadata = metadata.get("dump_metadata", {})
     if isinstance(dump_metadata, dict):
+        text_prompts = dump_metadata.get("text_prompts")
+        if isinstance(text_prompts, str):
+            normalized_prompts = [text_prompts.strip()]
+        elif isinstance(text_prompts, (list, tuple)) and all(
+            isinstance(prompt, str) for prompt in text_prompts
+        ):
+            normalized_prompts = [prompt.strip() for prompt in text_prompts]
+        else:
+            normalized_prompts = []
+        if normalized_prompts and any(normalized_prompts):
+            prompt_payload = json.dumps(
+                normalized_prompts,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            return f"prompt_sha256={hashlib.sha256(prompt_payload).hexdigest()}"
         for key in ("prompt_id", "prompt_index", "sample_id", "name"):
             if key in dump_metadata and str(dump_metadata[key]).strip():
                 seed = dump_metadata.get("seed")
