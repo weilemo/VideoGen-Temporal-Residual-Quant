@@ -19,6 +19,13 @@ MINIMUM_PARTIAL_R2="${MINIMUM_PARTIAL_R2:-0.01}"
 MINIMUM_CONTROL_MARGIN="${MINIMUM_CONTROL_MARGIN:-0.005}"
 MINIMUM_IMPROVED_GROUPS="${MINIMUM_IMPROVED_GROUPS:-0.60}"
 REQUIRE_PASS="${REQUIRE_PASS:-0}"
+STATE_SOURCE="${STATE_SOURCE:-raw}"
+CODEC_BITS="${CODEC_BITS:-4}"
+CODEC_ANCHOR_BITS="${CODEC_ANCHOR_BITS:-4}"
+CODEC_BLOCK_SIZE="${CODEC_BLOCK_SIZE:-64}"
+CODEC_PREDICTOR_STRIDE="${CODEC_PREDICTOR_STRIDE:-0}"
+CODEC_SCALE_PRECISION="${CODEC_SCALE_PRECISION:-bf16}"
+CODEC_RESIDUAL_QUANT_MODE="${CODEC_RESIDUAL_QUANT_MODE:-asym_zero_point}"
 
 output_dir="$(python -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "${OUTPUT_DIR}")"
 mkdir -p "${output_dir}"
@@ -48,6 +55,13 @@ command=(
   --minimum-partial-r2 "${MINIMUM_PARTIAL_R2}"
   --minimum-control-margin "${MINIMUM_CONTROL_MARGIN}"
   --minimum-improved-groups "${MINIMUM_IMPROVED_GROUPS}"
+  --state-source "${STATE_SOURCE}"
+  --codec-bits "${CODEC_BITS}"
+  --codec-anchor-bits "${CODEC_ANCHOR_BITS}"
+  --codec-block-size "${CODEC_BLOCK_SIZE}"
+  --codec-predictor-stride "${CODEC_PREDICTOR_STRIDE}"
+  --codec-scale-precision "${CODEC_SCALE_PRECISION}"
+  --codec-residual-quant-mode "${CODEC_RESIDUAL_QUANT_MODE}"
 )
 if [[ "${REQUIRE_PASS}" == "1" ]]; then
   command+=(--require-pass)

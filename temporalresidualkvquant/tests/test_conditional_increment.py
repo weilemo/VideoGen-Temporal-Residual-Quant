@@ -57,6 +57,27 @@ class ConditionalIncrementTests(TestCase):
         self.assertTrue(torch.equal(wrong_key[:, :, 1:], current_key[:, :, :-1]))
         self.assertTrue(torch.equal(wrong_key[:, :, :1], current_key[:, :, -1:]))
 
+    def test_reconstructed_history_does_not_replace_raw_target(self):
+        unit_size = 4
+        key = torch.arange(24, dtype=torch.float32).reshape(1, 1, 8, 3)
+        raw_value = key + 100
+        reconstructed_history = raw_value + 1000
+        features, target, _ = conditional_feature_batches(
+            key,
+            raw_value,
+            key + 2000,
+            unit_size=unit_size,
+            history_value=reconstructed_history,
+        )
+
+        self.assertTrue(
+            torch.equal(
+                features["temporal"],
+                reconstructed_history[:, :, :unit_size],
+            )
+        )
+        self.assertTrue(torch.equal(target, raw_value[:, :, unit_size:]))
+
     def test_rejects_single_token_units(self):
         tensor = torch.zeros(1, 1, 4, 2)
         with self.assertRaisesRegex(ValueError, "greater than one"):
@@ -169,6 +190,119 @@ class ConditionalIncrementTests(TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("prompt identities overlap", result.stderr)
+
+    def test_cli_accepts_full_decoder_state_source(self):
+        trq_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calibration = root / "calibration"
+            validation = root / "validation"
+            output = root / "output"
+            calibration.mkdir()
+            validation.mkdir()
+            for split, seeds in ((calibration, (1, 2)), (validation, (11, 12))):
+                for sample_index, seed in enumerate(seeds):
+                    key, value = self._sequence(seed, unit_size=4)
+                    torch.save(
+                        {
+                            "format": "hwq_kv_tensors",
+                            "metadata": {
+                                "sample_id": f"{split.name}_{sample_index:04d}",
+                                "text_prompts": [f"{split.name} prompt {seed}"],
+                                "frame_seq_length": 4,
+                            },
+                            "layers": {0: {"k": key, "v": value}},
+                        },
+                        split / f"prompt_{seed}.pt",
+                    )
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(trq_root / "src")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(trq_root / "scripts" / "analysis" / "analyze_conditional_increment.py"),
+                    "--calibration-dumps",
+                    str(calibration / "*.pt"),
+                    "--validation-dumps",
+                    str(validation / "*.pt"),
+                    "--output-dir",
+                    str(output),
+                    "--layers",
+                    "0",
+                    "--unit-size",
+                    "4",
+                    "--bootstrap-resamples",
+                    "10",
+                    "--state-source",
+                    "full_decoder_state",
+                    "--codec-block-size",
+                    "4",
+                    "--codec-scale-precision",
+                    "fp32",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            summary = json.loads((output / "summary.json").read_text())
+            self.assertEqual(summary["state_source"], "full_decoder_state")
+
+    def test_reconstructed_gate_summary_reports_retention(self):
+        trq_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            effects = {
+                "raw": (0.40, 0.50),
+                "reconstructed_k": (0.36, 0.45),
+                "full_decoder_state": (0.34, 0.42),
+            }
+            for name, values in effects.items():
+                result_dir = root / name
+                result_dir.mkdir()
+                (result_dir / "summary.json").write_text(
+                    json.dumps({"status": "PASS_STRUCTURE_GATE"})
+                )
+                (result_dir / "prompt_rows.csv").write_text(
+                    "prompt_id,partial_r2_joint\n"
+                    f"p0,{values[0]}\n"
+                    f"p1,{values[1]}\n"
+                )
+            output = root / "gate"
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(trq_root / "src")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(
+                        trq_root
+                        / "scripts"
+                        / "analysis"
+                        / "summarize_conditional_increment_states.py"
+                    ),
+                    "--raw",
+                    str(root / "raw"),
+                    "--reconstructed-k",
+                    str(root / "reconstructed_k"),
+                    "--full-decoder-state",
+                    str(root / "full_decoder_state"),
+                    "--output-dir",
+                    str(output),
+                    "--bootstrap-resamples",
+                    "20",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            summary = json.loads((output / "summary.json").read_text())
+            self.assertEqual(summary["status"], "PASS_RECONSTRUCTED_STATE_GATE")
+            self.assertGreater(
+                summary["effect_retention"]["full_decoder_state"]["median"], 0.8
+            )
 
     @staticmethod
     def _sequence(seed: int, unit_size: int) -> tuple[torch.Tensor, torch.Tensor]:

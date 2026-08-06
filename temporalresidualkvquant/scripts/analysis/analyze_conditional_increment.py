@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import numpy as np
+import torch
 
 from trq.analysis.conditional_increment import (
     JOINT_MODEL_NAMES,
@@ -23,9 +24,11 @@ from trq.analysis.conditional_increment import (
 )
 from trq.analysis.conditional_innovation import bootstrap_median_ci
 from trq.analysis.kv_dump import iter_kv_dump_layers, resolve_dump_paths
+from trq.real.s2pp import s2pp_dequantize_tensor, s2pp_quantize_tensor
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+STATE_SOURCES = ("raw", "reconstructed_k", "full_decoder_state")
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,6 +51,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--minimum-partial-r2", type=float, default=0.01)
     parser.add_argument("--minimum-control-margin", type=float, default=0.005)
     parser.add_argument("--minimum-improved-groups", type=float, default=0.60)
+    parser.add_argument("--state-source", choices=STATE_SOURCES, default="raw")
+    parser.add_argument("--codec-bits", type=int, default=4)
+    parser.add_argument("--codec-anchor-bits", type=int, default=4)
+    parser.add_argument("--codec-block-size", type=int, default=64)
+    parser.add_argument(
+        "--codec-predictor-stride",
+        type=int,
+        default=0,
+        help="Temporal codec stride; zero uses the dump unit size.",
+    )
+    parser.add_argument(
+        "--codec-scale-precision",
+        choices=("bf16", "fp16", "fp32"),
+        default="bf16",
+    )
+    parser.add_argument(
+        "--codec-residual-quant-mode",
+        choices=("symmetric", "asym_zero_point"),
+        default="asym_zero_point",
+    )
     parser.add_argument("--require-pass", action="store_true")
     return parser.parse_args()
 
@@ -62,11 +85,12 @@ def main() -> int:
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     print(
-        f"[fit] prompts={len(calibration)} layers={args.layers} ridge={args.ridge}",
+        f"[fit] prompts={len(calibration)} layers={args.layers} ridge={args.ridge} "
+        f"state_source={args.state_source}",
         flush=True,
     )
     models = fit_conditional_models(
-        _records(calibration, args.layers, args.unit_size),
+        _records(calibration, args, include_prompt=False),
         ridge=args.ridge,
         wrong_space_shift=args.wrong_space_shift,
         sample_chunk=args.sample_chunk,
@@ -75,9 +99,9 @@ def main() -> int:
 
     layer_head_rows: list[dict[str, Any]] = []
     for prompt_index, record in enumerate(
-        _records(validation, args.layers, args.unit_size, include_prompt=True), start=1
+        _records(validation, args, include_prompt=True), start=1
     ):
-        prompt_id, layer, key, value, donor_key, unit_size = record
+        prompt_id, layer, key, value, donor_key, unit_size, history_value = record
         print(
             f"[evaluate] prompt={prompt_id} layer={layer} ({prompt_index})",
             flush=True,
@@ -91,6 +115,7 @@ def main() -> int:
             models[layer],
             unit_size=unit_size,
             wrong_space_shift=args.wrong_space_shift,
+            history_value=history_value,
         ):
             layer_head_rows.append(
                 {"prompt_id": prompt_id, "layer": layer, "unit_size": unit_size, **row}
@@ -105,8 +130,9 @@ def main() -> int:
         "validation_prompts": _manifest_split(validation),
         "config": vars(args),
         "scientific_scope": (
-            "held-out affine/ridge conditional predictive gain only; no conditional "
-            "mutual-information, online-codec, video-quality, or system claim"
+            f"held-out affine/ridge conditional predictive gain with "
+            f"state_source={args.state_source}; no conditional mutual-information, "
+            "online-codec, video-quality, or system claim"
         ),
     }
     _write_csv(output_dir / "layer_head_rows.csv", layer_head_rows)
@@ -135,16 +161,15 @@ def _index_split(path_spec: str, layers: str) -> dict[str, list[Path]]:
 
 def _records(
     split: dict[str, list[Path]],
-    layers: str,
-    requested_unit_size: int,
+    args: argparse.Namespace,
     *,
     include_prompt: bool = False,
 ) -> Iterator[Any]:
     prompt_ids = sorted(split)
     for index, prompt_id in enumerate(prompt_ids):
         donor_id = prompt_ids[(index + 1) % len(prompt_ids)]
-        target_layers = _load_prompt_layers(split[prompt_id], layers)
-        donor_layers = _load_prompt_layers(split[donor_id], layers)
+        target_layers = _load_prompt_layers(split[prompt_id], args.layers)
+        donor_layers = _load_prompt_layers(split[donor_id], args.layers)
         if set(target_layers) != set(donor_layers):
             raise ValueError(
                 f"target/donor layer mismatch: {prompt_id} vs {donor_id}"
@@ -152,15 +177,77 @@ def _records(
         for layer in sorted(target_layers):
             key, value, metadata = target_layers[layer]
             donor_key, _, donor_metadata = donor_layers[layer]
-            unit_size = _unit_size(requested_unit_size, metadata)
-            donor_unit_size = _unit_size(requested_unit_size, donor_metadata)
+            unit_size = _unit_size(args.unit_size, metadata)
+            donor_unit_size = _unit_size(args.unit_size, donor_metadata)
             if unit_size != donor_unit_size:
                 raise ValueError(
                     f"target/donor unit-size mismatch at layer {layer}: "
                     f"{unit_size} vs {donor_unit_size}"
                 )
-            payload = (layer, key, value, donor_key, unit_size)
+            analysis_key, history_value = _state_inputs(
+                key, value, unit_size=unit_size, layer=layer, args=args
+            )
+            analysis_donor_key, _ = _state_inputs(
+                donor_key, None, unit_size=unit_size, layer=layer, args=args
+            )
+            payload = (
+                layer,
+                analysis_key,
+                value,
+                analysis_donor_key,
+                unit_size,
+                history_value,
+            )
             yield (prompt_id, *payload) if include_prompt else payload
+
+
+def _state_inputs(
+    key: torch.Tensor,
+    value: torch.Tensor | None,
+    *,
+    unit_size: int,
+    layer: int,
+    args: argparse.Namespace,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    if args.state_source == "raw":
+        return key, value
+    reconstructed_key = _reconstruct_temporal_tensor(
+        key, unit_size=unit_size, layer=layer, role="k", args=args
+    )
+    if args.state_source == "reconstructed_k" or value is None:
+        return reconstructed_key, value
+    return reconstructed_key, _reconstruct_temporal_tensor(
+        value, unit_size=unit_size, layer=layer, role="v", args=args
+    )
+
+
+def _reconstruct_temporal_tensor(
+    tensor: torch.Tensor,
+    *,
+    unit_size: int,
+    layer: int,
+    role: str,
+    args: argparse.Namespace,
+) -> torch.Tensor:
+    scale_precision = {
+        "bf16": torch.bfloat16,
+        "fp16": torch.float16,
+        "fp32": torch.float32,
+    }[args.codec_scale_precision]
+    stride = args.codec_predictor_stride or unit_size
+    state = s2pp_quantize_tensor(
+        tensor,
+        num_bits=args.codec_bits,
+        block_size=args.codec_block_size,
+        anchor_bits=args.codec_anchor_bits,
+        predictor_stride=stride,
+        mode="identity",
+        scale_precision=scale_precision,
+        residual_quant_mode=args.codec_residual_quant_mode,
+        layer_idx=layer,
+        parameter_role=role,
+    )
+    return s2pp_dequantize_tensor(state, output_dtype=tensor.dtype)
 
 
 def _load_prompt_layers(
@@ -219,6 +306,7 @@ def _summarize(
     passed = joint_pass and controls_pass
     return {
         "schema_version": SCHEMA_VERSION,
+        "state_source": args.state_source,
         "status": "PASS_STRUCTURE_GATE" if passed else "FAIL_STRUCTURE_GATE",
         "scientific_scope": (
             "held-out affine/ridge conditional predictive gain only; passing does not "
@@ -263,6 +351,10 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("effect thresholds must be non-negative")
     if not 0 < args.minimum_improved_groups <= 1:
         raise ValueError("minimum-improved-groups must be in (0, 1]")
+    if args.codec_bits not in (2, 4, 8) or args.codec_anchor_bits not in (2, 4, 8):
+        raise ValueError("codec bits and anchor bits must be one of 2, 4, or 8")
+    if args.codec_block_size <= 0 or args.codec_predictor_stride < 0:
+        raise ValueError("codec block size/stride arguments are invalid")
 
 
 def _unit_size(requested: int, metadata: dict[str, Any]) -> int:
@@ -330,6 +422,7 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
         "# K-to-V Conditional Increment Report",
         "",
         f"- Status: **{summary['status']}**",
+        f"- State source: **{summary.get('state_source', 'unknown')}**",
         f"- Joint partial R2 median: {joint['partial_r2']['median']:.6f}",
         f"- Joint partial R2 CI95: [{joint['partial_r2']['ci95_lower']:.6f}, "
         f"{joint['partial_r2']['ci95_upper']:.6f}]",

@@ -116,9 +116,14 @@ def conditional_feature_batches(
     *,
     unit_size: int,
     wrong_space_shift: int = 1,
+    history_value: torch.Tensor | None = None,
 ) -> tuple[dict[str, torch.Tensor], torch.Tensor, int]:
     """Build aligned temporal, joint, and matched-control feature tensors."""
     _validate_kv(key, value)
+    history_value = value if history_value is None else history_value
+    _validate_kv(key, history_value)
+    if history_value.shape != value.shape:
+        raise ValueError("history V geometry does not match target V")
     if donor_key.ndim != 4 or not donor_key.is_floating_point():
         raise ValueError("donor K must be a floating-point BHSD tensor")
     if (donor_key.shape[0], donor_key.shape[1], donor_key.shape[3]) != (
@@ -140,17 +145,27 @@ def conditional_feature_batches(
     key_units = key[:, :, : units * unit_size].reshape(
         key.shape[0], key.shape[1], units, unit_size, key.shape[3]
     )
-    value_units = value[:, :, : units * unit_size].reshape(
+    target_value_units = value[:, :, : units * unit_size].reshape(
         value.shape[0], value.shape[1], units, unit_size, value.shape[3]
+    )
+    history_value_units = history_value[:, :, : units * unit_size].reshape(
+        history_value.shape[0],
+        history_value.shape[1],
+        units,
+        unit_size,
+        history_value.shape[3],
     )
     donor_units = donor_key[:, :, : units * unit_size].reshape(
         donor_key.shape[0], donor_key.shape[1], units, unit_size, donor_key.shape[3]
     )
 
-    previous_value = value_units[:, :, :-1].reshape(
-        value.shape[0], value.shape[1], token_count, value.shape[3]
+    previous_value = history_value_units[:, :, :-1].reshape(
+        history_value.shape[0],
+        history_value.shape[1],
+        token_count,
+        history_value.shape[3],
     )
-    current_value = value_units[:, :, 1:].reshape(
+    current_value = target_value_units[:, :, 1:].reshape(
         value.shape[0], value.shape[1], token_count, value.shape[3]
     )
     previous_key = key_units[:, :, :-1].reshape(
@@ -179,7 +194,10 @@ def conditional_feature_batches(
 
 
 def fit_conditional_models(
-    records: Iterable[tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, int]],
+    records: Iterable[
+        tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, int]
+        | tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, int, torch.Tensor]
+    ],
     *,
     ridge: float,
     wrong_space_shift: int = 1,
@@ -187,13 +205,21 @@ def fit_conditional_models(
 ) -> dict[int, dict[str, AffineModel]]:
     """Fit every pre-registered model per layer from calibration records."""
     accumulators: dict[int, dict[str, AffineAccumulator]] = {}
-    for layer, key, value, donor_key, unit_size in records:
+    for record in records:
+        if len(record) == 5:
+            layer, key, value, donor_key, unit_size = record
+            history_value = value
+        elif len(record) == 6:
+            layer, key, value, donor_key, unit_size, history_value = record
+        else:
+            raise ValueError("conditional record must contain 5 or 6 fields")
         features, target, _ = conditional_feature_batches(
             key,
             value,
             donor_key,
             unit_size=unit_size,
             wrong_space_shift=wrong_space_shift,
+            history_value=history_value,
         )
         layer_accumulators = accumulators.setdefault(layer, {})
         for name, feature in features.items():
@@ -225,6 +251,7 @@ def evaluate_conditional_record(
     *,
     unit_size: int,
     wrong_space_shift: int = 1,
+    history_value: torch.Tensor | None = None,
 ) -> list[dict[str, float | int | str]]:
     """Return one SSE/MSE row per method and head for one layer record."""
     features, target, pairs = conditional_feature_batches(
@@ -233,6 +260,7 @@ def evaluate_conditional_record(
         donor_key,
         unit_size=unit_size,
         wrong_space_shift=wrong_space_shift,
+        history_value=history_value,
     )
     if set(models) != set(MODEL_NAMES):
         raise ValueError("fitted model set does not match the pre-registered matrix")
