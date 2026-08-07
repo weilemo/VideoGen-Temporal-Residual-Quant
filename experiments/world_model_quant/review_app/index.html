@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>B1 快速匿名审阅 / Fast Anonymous Review</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div><h1>B1 快速匿名审阅</h1><p id="task-meta">正在加载...</p></div>
+      <label class="reviewer-field">审阅者 ID<input id="reviewer-id" autocomplete="off" placeholder="例如 reviewer_01"></label>
+      <div class="progress-wrap"><span id="progress-text">0 / 0</span><progress id="progress" value="0" max="1"></progress></div>
+    </header>
+
+    <main>
+      <nav class="toolbar" aria-label="审阅工具栏">
+        <button id="prev" type="button" title="上一面板">←</button>
+        <button id="next-incomplete" type="button">下一未完成项</button>
+        <button id="sync-play" type="button">播放/暂停全部 <kbd>Space</kbd></button>
+        <select id="speed" aria-label="播放速度"><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+        <select id="task-filter" aria-label="筛选任务">
+          <option value="all">全部</option><option value="incomplete">仅未完成</option>
+          <option value="catastrophe">视频质量</option><option value="action">动作控制</option>
+        </select>
+        <button id="export" type="button">导出 JSON</button>
+        <label class="import-label">导入 JSON<input id="import" type="file" accept="application/json"></label>
+      </nav>
+
+      <section class="task-header">
+        <div><span id="kind-badge" class="badge"></span><strong id="baseline"></strong></div>
+        <p id="prompt"></p><p id="conditioning-note" class="notice" hidden></p>
+        <div id="rubric"></div>
+      </section>
+
+      <nav id="action-tabs" class="action-tabs" hidden></nav>
+      <section id="review-root" aria-live="polite"></section>
+      <p id="validation" class="validation" role="status"></p>
+    </main>
+
+    <footer>
+      <span>快捷键：空格同步播放，1–5 标记可疑，N 快速通过，←/→ 导航</span>
+      <div class="footer-actions">
+        <button id="detailed-complete" type="button">保存详细判断并下一项</button>
+        <button id="quick-complete" class="primary" type="button">未发现明显异常，下一项 (N)</button>
+      </div>
+    </footer>
+    <script src="app.js"></script>
+  </body>
+</html>

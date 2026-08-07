@@ -23,9 +23,8 @@ urllib3
 boto3
 omegaconf
 transformers==4.33.2
-peft<0.10
+peft>=0.10,<0.11
 pycocoevalcap
 moviepy==1.0.3
 av
 dreamsim
-# peft-0.18.1 tokenizers-0.22.2 transformers-4.57.6

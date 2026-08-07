@@ -321,6 +321,77 @@ class CausalWanSelfAttention(nn.Module):
                 k_all, grid_sizes, freqs, start_frame=local_start_frame
             ).type_as(v)
 
+        trace_reference = kv_cache.pop("_trq_attention_reference", None)
+        if trace_reference is not None:
+            from trq.analysis.attention_sensitivity import (
+                sampled_attention_metrics,
+                write_attention_trace,
+            )
+
+            reference_k = k_all.clone()
+            reference_v = v_all.clone()
+            trace_start = int(trace_reference["tokens_start"])
+            trace_end = int(trace_reference["tokens_end"])
+            if trace_reference.get("k") is not None:
+                reference_k[:, trace_start:trace_end] = trace_reference["k"]
+            if trace_reference.get("v") is not None:
+                reference_v[:, trace_start:trace_end] = trace_reference["v"]
+            if sink_tokens:
+                reference_sink_k = causal_rope_apply_long_input(
+                    reference_k[:, :sink_tokens], grid_sizes, freqs, start_frame=0
+                )
+                reference_tail_k = causal_rope_apply_long_input(
+                    reference_k[:, sink_tokens:],
+                    grid_sizes,
+                    freqs,
+                    start_frame=tail_start_frame,
+                )
+                reference_k_input = torch.cat(
+                    [reference_sink_k, reference_tail_k], dim=1
+                ).type_as(v)
+            else:
+                reference_k_input = causal_rope_apply_long_input(
+                    reference_k,
+                    grid_sizes,
+                    freqs,
+                    start_frame=local_start_frame,
+                ).type_as(v)
+            trace_metrics = sampled_attention_metrics(
+                roped_query,
+                reference_k_input,
+                reference_v,
+                k_input,
+                v_all,
+                max_query_tokens=int(trace_reference["max_query_tokens"]),
+                max_key_tokens=int(trace_reference["max_key_tokens"]),
+                topk=int(trace_reference["topk"]),
+            )
+            reference_k_float = reference_k.float()
+            reference_v_float = reference_v.float()
+            trace_metrics["k_cache_read_rel_l2"] = float(
+                (
+                    torch.linalg.vector_norm(reference_k_float - k_all.float())
+                    / torch.linalg.vector_norm(reference_k_float).clamp_min(1e-12)
+                ).item()
+            )
+            trace_metrics["v_cache_read_rel_l2"] = float(
+                (
+                    torch.linalg.vector_norm(reference_v_float - v_all.float())
+                    / torch.linalg.vector_norm(reference_v_float).clamp_min(1e-12)
+                ).item()
+            )
+            write_attention_trace(
+                trace_reference["output_dir"],
+                layer_idx=int(trace_reference["layer_idx"]),
+                boundary_frame=int(trace_reference["boundary_frame"]),
+                metrics=trace_metrics,
+                metadata={
+                    "cache_roles": trace_reference["cache_roles"],
+                    "tokens_start": trace_start,
+                    "tokens_end": trace_end,
+                },
+            )
+
         x = attention(roped_query, k_input, v_all)
         
         kv_cache["global_end_index"].fill_(current_end)

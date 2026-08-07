@@ -42,6 +42,7 @@ parser.add_argument("--save_with_index", action="store_true",
 parser.add_argument("--profile", action="store_true", help="Collect structured runtime and memory metrics")
 parser.add_argument("--save_rollout_latents", action="store_true", help="Save clean rollout latents for paired analysis")
 parser.add_argument("--rollout_metrics_dir", type=str, default="", help="Output root for latent and runtime metric files")
+parser.add_argument("--prompt_indices", type=str, default="", help="Optional comma-separated prompt indices to run without renumbering")
 
 #########################################################
 # Quantization Configuration
@@ -55,12 +56,23 @@ parser.add_argument("--num_prq_stages", type=int, default=1, help="Number of PRQ
 parser.add_argument("--trq_group_size", "--hrq_group_size", dest="trq_group_size", type=int, default=64, help="Group size for TRQ")
 parser.add_argument("--trq_anchor_bits", "--hrq_anchor_bits", dest="trq_anchor_bits", type=int, default=4, help="Anchor bit width for TRQ")
 parser.add_argument("--trq_predictor_stride", "--hrq_predictor_stride", dest="trq_predictor_stride", type=int, default=1560, help="Predictor stride for TRQ")
-parser.add_argument("--trq_predictor_mode", "--hrq_predictor_mode", dest="trq_predictor_mode", type=str, default="identity", choices=["identity", "affine_channel", "affine"], help="Stable TRQ predictor")
+parser.add_argument("--trq_predictor_mode", "--hrq_predictor_mode", dest="trq_predictor_mode", type=str, default="identity", choices=["identity", "affine_channel", "affine"], help="Default TRQ predictor")
+parser.add_argument("--trq_k_predictor_mode", type=str, default="", help="Optional K-specific predictor override")
+parser.add_argument("--trq_v_predictor_mode", type=str, default="", choices=["", "identity", "affine_channel", "affine", "cross_kv", "hybrid_kv_innovation"], help="Optional V-specific predictor override; cross/hybrid requires s2pp quant_type")
 parser.add_argument("--trq_predictor_params_path", "--hrq_predictor_params_path", dest="trq_predictor_params_path", type=str, default="", help="Path to fitted affine predictor params (.pt or .npz)")
+parser.add_argument("--trq_v_predictor_params_path", type=str, default="", help="Optional V-specific predictor params (.npz)")
 parser.add_argument("--trq_scale_precision", "--hrq_scale_precision", dest="trq_scale_precision", type=str, default="bf16", help="Scale precision for TRQ")
 parser.add_argument("--trq_residual_quant_mode", "--hrq_residual_quant_mode", dest="trq_residual_quant_mode", type=str, default="asym_zero_point", help="Residual quantization mode for TRQ")
 parser.add_argument("--trq_k_bits", type=int, default=0, help="Optional K residual bit override")
 parser.add_argument("--trq_v_bits", type=int, default=0, help="Optional V residual bit override")
+parser.add_argument("--trq_first_quant_frame", type=int, default=24, help="First scheduled online quantization boundary in latent-frame steps")
+parser.add_argument("--trq_quant_interval_frames", type=int, default=24, help="Frame span converted by each bulk quantization event")
+parser.add_argument("--trq_quant_schedule", type=str, default="bulk", choices=["bulk", "gradual"], help="Online conversion schedule")
+parser.add_argument("--trq_gradual_frames", type=int, default=3, help="Frames converted per block by the gradual schedule")
+parser.add_argument("--trq_protected_sink_frames", type=int, default=0, help="Earliest frames that remain BF16")
+parser.add_argument("--trq_cache_roles", type=str, default="both", choices=["both", "k", "v"], help="Cache roles quantized by TRQ")
+parser.add_argument("--trq_quantized_layers", type=str, default="all", help="Layer selection such as all, 0-7, or 8,10-12")
+parser.add_argument("--attention_sink_frames", type=int, default=0, help="Frames retained as the attention sink during cache eviction")
 parser.add_argument("--headwise_mode", type=str, default="none", help="Head-wise policy mode: none, random, or topk")
 parser.add_argument("--headwise_seed", type=int, default=0, help="Random seed used for head-wise grouping")
 parser.add_argument("--num_high_precision_heads", type=int, default=0, help="How many heads use the high-precision quant type")
@@ -110,11 +122,22 @@ config.quant_config = {
     "trq_anchor_bits": args.trq_anchor_bits,
     "trq_predictor_stride": args.trq_predictor_stride,
     "trq_predictor_mode": args.trq_predictor_mode,
+    "trq_k_predictor_mode": args.trq_k_predictor_mode or None,
+    "trq_v_predictor_mode": args.trq_v_predictor_mode or None,
     "trq_predictor_params_path": args.trq_predictor_params_path,
+    "trq_v_predictor_params_path": args.trq_v_predictor_params_path or None,
     "trq_scale_precision": args.trq_scale_precision,
     "trq_residual_quant_mode": args.trq_residual_quant_mode,
     "trq_k_bits": args.trq_k_bits,
     "trq_v_bits": args.trq_v_bits,
+    "trq_first_quant_frame": args.trq_first_quant_frame,
+    "trq_quant_interval_frames": args.trq_quant_interval_frames,
+    "trq_quant_schedule": args.trq_quant_schedule,
+    "trq_gradual_frames": args.trq_gradual_frames,
+    "trq_protected_sink_frames": args.trq_protected_sink_frames,
+    "trq_cache_roles": args.trq_cache_roles,
+    "trq_quantized_layers": args.trq_quantized_layers,
+    "attention_sink_frames": args.attention_sink_frames,
     "headwise_mode": args.headwise_mode,
     "headwise_seed": args.headwise_seed,
     "num_high_precision_heads": args.num_high_precision_heads,
@@ -131,6 +154,11 @@ if args.local_attn_size >= 0:
     if "model_kwargs" not in config or config.model_kwargs is None:
         config.model_kwargs = OmegaConf.create()
     config.model_kwargs.local_attn_size = args.local_attn_size
+if args.attention_sink_frames < 0:
+    raise ValueError("attention_sink_frames must be non-negative")
+if "model_kwargs" not in config or config.model_kwargs is None:
+    config.model_kwargs = OmegaConf.create()
+config.model_kwargs.sink_size = args.attention_sink_frames
 
 # Initialize pipeline
 if hasattr(config, 'denoising_step_list'):
@@ -165,7 +193,17 @@ if args.i2v:
 else:
     dataset = TextDataset(prompt_path=args.data_path, extended_prompt_path=args.extended_prompt_path)
 num_prompts = len(dataset)
+selected_prompt_indices = None
+if args.prompt_indices.strip():
+    selected_prompt_indices = {int(value.strip()) for value in args.prompt_indices.split(",") if value.strip()}
+    invalid_prompt_indices = sorted(index for index in selected_prompt_indices if not 0 <= index < num_prompts)
+    if invalid_prompt_indices:
+        raise ValueError(f"prompt_indices outside [0, {num_prompts - 1}]: {invalid_prompt_indices}")
+    if not selected_prompt_indices:
+        raise ValueError("prompt_indices selected no prompts")
 print(f"Number of prompts: {num_prompts}")
+if selected_prompt_indices is not None:
+    print(f"Selected prompt indices: {sorted(selected_prompt_indices)}")
 
 if dist.is_initialized():
     sampler = DistributedSampler(dataset, shuffle=False, drop_last=True)
@@ -201,6 +239,8 @@ def encode(self, videos: torch.Tensor) -> torch.Tensor:
 
 for i, batch_data in tqdm(enumerate(dataloader), disable=(local_rank != 0)):
     idx = batch_data['idx'].item()
+    if selected_prompt_indices is not None and idx not in selected_prompt_indices:
+        continue
 
     # For DataLoader batch_size=1, the batch_data is already a single item, but in a batch container
     # Unpack the batch data for convenience
@@ -292,6 +332,15 @@ for i, batch_data in tqdm(enumerate(dataloader), disable=(local_rank != 0)):
                 "trq_predictor_mode": str(args.trq_predictor_mode),
                 "trq_scale_precision": str(args.trq_scale_precision),
                 "trq_residual_quant_mode": str(args.trq_residual_quant_mode),
+                "trq_first_quant_frame": int(args.trq_first_quant_frame),
+                "trq_quant_interval_frames": int(args.trq_quant_interval_frames),
+                "trq_quant_schedule": str(args.trq_quant_schedule),
+                "trq_gradual_frames": int(args.trq_gradual_frames),
+                "trq_protected_sink_frames": int(args.trq_protected_sink_frames),
+                "trq_cache_roles": str(args.trq_cache_roles),
+                "trq_quantized_layers": str(args.trq_quantized_layers),
+                "attention_sink_frames": int(args.attention_sink_frames),
+                "quantization_events": list(getattr(pipeline, "last_quantization_events", [])),
                 "torch_version": str(torch.__version__),
                 "cuda_version": str(torch.version.cuda),
                 "gpu_name": str(torch.cuda.get_device_name(device)),

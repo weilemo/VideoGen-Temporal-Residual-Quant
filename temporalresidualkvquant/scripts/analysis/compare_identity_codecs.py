@@ -157,7 +157,7 @@ def main() -> None:
 
 
 def _load_student_codec(qvg_root: Path):
-    package_root = qvg_root / "Quant-VideoGen"
+    package_root = qvg_root / "references" / "quant-videogen"
     codec_path = package_root / "quant_videogen" / "real" / "s2pp.py"
     if not codec_path.is_file():
         raise FileNotFoundError(

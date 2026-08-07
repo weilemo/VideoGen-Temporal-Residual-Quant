@@ -3,6 +3,7 @@ import os
 import re
 import yaml
 import cv2
+import av
 import json
 import random
 import numpy as np
@@ -11,13 +12,37 @@ from PIL import Image
 from tqdm import tqdm
 from pathlib import Path
 from bisect import bisect_left
+from fractions import Fraction
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
-from torchvision.io import write_video
 from decord import VideoReader
+
+try:
+    from torchvision.io import write_video
+except ImportError:
+    def write_video(filename, video_array, fps, **kwargs):
+        """PyAV fallback for torchvision >= 0.24, which removed write_video."""
+        if isinstance(video_array, torch.Tensor):
+            video_array = video_array.detach().cpu().numpy()
+        video_array = np.asarray(video_array)
+        if video_array.dtype != np.uint8:
+            video_array = np.clip(video_array, 0, 255).astype(np.uint8)
+
+        height, width = video_array.shape[1:3]
+        with av.open(filename, mode="w") as container:
+            stream = container.add_stream("libx264", rate=Fraction(str(fps)))
+            stream.width = width
+            stream.height = height
+            stream.pix_fmt = "yuv420p"
+            for frame in video_array:
+                video_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
+                for packet in stream.encode(video_frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
 
 from collections import defaultdict
 from vbench.utils import CACHE_DIR, load_video, save_json, load_dimension_info, dino_transform, dino_transform_Image

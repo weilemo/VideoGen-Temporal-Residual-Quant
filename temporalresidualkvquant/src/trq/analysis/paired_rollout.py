@@ -32,7 +32,14 @@ def analyze_paired_rollouts(
     *,
     bootstrap_resamples: int = 2000,
     seed: int = 0,
+    first_quant_frame: int | None = None,
+    boundary_before: int = 6,
+    boundary_after: int = 6,
+    config_label: str = "trq",
+    quant_interval_frames: int = 24,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    if boundary_before <= 0 or boundary_after <= 0:
+        raise ValueError("boundary windows must be positive")
     groups = {
         "bf16_a": load_rollouts(bf16_a),
         "bf16_b": load_rollouts(bf16_b),
@@ -81,24 +88,69 @@ def analyze_paired_rollouts(
             })
 
         early_count = max(1, int(math.ceil(a.shape[0] * 0.2)))
-        noise_growth = float(np.median(noise_rel[-early_count:]) - np.median(noise_rel[:early_count]))
-        trq_growth = float(np.median(trq_rel[-early_count:]) - np.median(trq_rel[:early_count]))
+        noise_early = float(np.median(noise_rel[:early_count]))
+        noise_late = float(np.median(noise_rel[-early_count:]))
+        trq_early = float(np.median(trq_rel[:early_count]))
+        trq_late = float(np.median(trq_rel[-early_count:]))
+        excess_early = float(np.median(excess_rel[:early_count]))
+        excess_late = float(np.median(excess_rel[-early_count:]))
+        noise_growth = noise_late - noise_early
+        trq_growth = trq_late - trq_early
         noise_slope = theil_sen_slope(noise_rel)
         trq_slope = theil_sen_slope(trq_rel)
+        excess_slope = theil_sen_slope(excess_rel)
+        event_frames = quantization_frames(
+            q_record.metadata,
+            fallback=first_quant_frame,
+            interval=quant_interval_frames,
+            positions=int(a.shape[0]),
+        )
+        boundary_frame = min(event_frames) if event_frames else None
+        boundary_jump = None
+        boundary_pre_median = None
+        boundary_post_median = None
+        if boundary_frame is not None:
+            if boundary_frame - boundary_before < 0 or boundary_frame + boundary_after > a.shape[0]:
+                raise ValueError(
+                    f"boundary window [{boundary_frame - boundary_before}, "
+                    f"{boundary_frame + boundary_after}) is outside rollout {key} with {a.shape[0]} positions"
+                )
+            boundary_pre_median = float(
+                np.median(excess_rel[boundary_frame - boundary_before:boundary_frame])
+            )
+            boundary_post_median = float(
+                np.median(excess_rel[boundary_frame:boundary_frame + boundary_after])
+            )
+            boundary_jump = boundary_post_median - boundary_pre_median
         pair_rows.append({
+            "config": config_label,
             "prompt_index": key[0],
             "seed": key[1],
             "sample_index": key[2],
             "positions": int(a.shape[0]),
             "bf16_repeat_growth": noise_growth,
             "trq_growth": trq_growth,
-            "trq_excess_growth": trq_growth - noise_growth,
+            "early_median": excess_early,
+            "late_median": excess_late,
+            "growth": excess_late - excess_early,
+            "final": float(excess_rel[-1]),
+            "p95": float(np.quantile(excess_rel, 0.95)),
+            "max": float(np.max(excess_rel)),
+            "theil_sen_slope": excess_slope,
+            "trq_excess_growth": excess_late - excess_early,
             "bf16_repeat_slope": noise_slope,
             "trq_slope": trq_slope,
-            "trq_excess_slope": trq_slope - noise_slope,
+            "trq_excess_slope": excess_slope,
             "bf16_repeat_final_rel_l2": float(noise_rel[-1]),
             "trq_final_rel_l2": float(trq_rel[-1]),
             "trq_excess_final_rel_l2": float(excess_rel[-1]),
+            "first_quant_frame": boundary_frame,
+            "quantization_frames": ";".join(str(value) for value in event_frames),
+            "boundary_before": int(boundary_before) if boundary_frame is not None else None,
+            "boundary_after": int(boundary_after) if boundary_frame is not None else None,
+            "boundary_pre_median": boundary_pre_median,
+            "boundary_post_median": boundary_post_median,
+            "boundary_jump": boundary_jump,
         })
 
     growth_values = prompt_level_values(pair_rows, "trq_excess_growth")
@@ -110,7 +162,8 @@ def analyze_paired_rollouts(
     growth_margin = max(0.02, float(np.quantile(np.abs(noise_growth_values), 0.95)))
     slope_margin = max(0.02, float(np.quantile(np.abs(noise_slope_values), 0.95)))
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "config": config_label,
         "pairs": len(pair_rows),
         "prompts": len({row["prompt_index"] for row in pair_rows}),
         "bootstrap_resamples": int(bootstrap_resamples),
@@ -126,12 +179,53 @@ def analyze_paired_rollouts(
             "noise_aware_margin": slope_margin,
             "passes_no_progressive_drift_gate": bool(slope_ci[1] <= slope_margin),
         },
+        "absolute_metrics": {
+            field: summarize_prompt_metric(pair_rows, field, bootstrap_resamples, seed + 10 + index)
+            for index, field in enumerate(
+                ("early_median", "late_median", "growth", "final", "p95", "max", "theil_sen_slope")
+            )
+        },
     }
+    boundary_values = [
+        float(row["boundary_jump"])
+        for row in pair_rows
+        if row["boundary_jump"] is not None
+    ]
+    summary["boundary_jump"] = (
+        summarize_prompt_metric(pair_rows, "boundary_jump", bootstrap_resamples, seed + 30)
+        if boundary_values
+        else None
+    )
     summary["passes_latent_drift_gate"] = bool(
         summary["trq_excess_growth"]["passes_no_progressive_drift_gate"]
         and summary["trq_excess_slope"]["passes_no_progressive_drift_gate"]
     )
     return position_rows, pair_rows, summary
+
+
+def quantization_frames(
+    metadata: dict[str, Any],
+    *,
+    fallback: int | None,
+    interval: int,
+    positions: int | None,
+) -> list[int]:
+    events = metadata.get("quantization_events")
+    if isinstance(events, list):
+        boundaries = [
+            int(event["boundary_frame"])
+            for event in events
+            if isinstance(event, dict) and event.get("boundary_frame") is not None
+        ]
+        if boundaries:
+            return sorted(set(boundaries))
+    if fallback is None:
+        return []
+    if interval <= 0:
+        raise ValueError("quant_interval_frames must be positive")
+    if positions is None:
+        return [int(fallback)]
+    return list(range(int(fallback), int(positions), int(interval)))
 
 
 def load_rollouts(source: str | Path) -> dict[RolloutKey, RolloutRecord]:
@@ -226,8 +320,24 @@ def theil_sen_slope(values: np.ndarray) -> float:
 def prompt_level_values(rows: list[dict[str, Any]], field: str) -> np.ndarray:
     grouped: dict[int, list[float]] = defaultdict(list)
     for row in rows:
-        grouped[int(row["prompt_index"])].append(float(row[field]))
+        if row.get(field) is not None:
+            grouped[int(row["prompt_index"])].append(float(row[field]))
     return np.asarray([np.median(values) for _, values in sorted(grouped.items())], dtype=np.float64)
+
+
+def summarize_prompt_metric(
+    rows: list[dict[str, Any]],
+    field: str,
+    bootstrap_resamples: int,
+    seed: int,
+) -> dict[str, Any]:
+    values = prompt_level_values(rows, field)
+    if values.size == 0:
+        raise ValueError(f"metric {field} has no prompt-level values")
+    return {
+        "prompt_median": float(np.median(values)),
+        "bootstrap_95_ci": bootstrap_median_ci(values, bootstrap_resamples, seed),
+    }
 
 
 def bootstrap_median_ci(values: np.ndarray, resamples: int, seed: int) -> list[float]:
@@ -250,6 +360,28 @@ def write_analysis(
     output.mkdir(parents=True, exist_ok=True)
     write_csv(output / "position_rows.csv", position_rows)
     write_csv(output / "pair_summary.csv", pair_rows)
+    write_csv(output / "online_absolute_metrics.csv", pair_rows)
+    boundary_rows = [
+        {
+            key: row[key]
+            for key in (
+                "config",
+                "prompt_index",
+                "seed",
+                "sample_index",
+                "first_quant_frame",
+                "boundary_before",
+                "boundary_after",
+                "boundary_pre_median",
+                "boundary_post_median",
+                "boundary_jump",
+            )
+        }
+        for row in pair_rows
+        if row["first_quant_frame"] is not None
+    ]
+    if boundary_rows:
+        write_csv(output / "online_boundary_jump.csv", boundary_rows)
     with open(output / "summary.json", "w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2, ensure_ascii=False)
     growth = summary["trq_excess_growth"]
@@ -268,6 +400,85 @@ def write_analysis(
         "This gate covers latent trajectory drift only. VBench and qualitative late-frame checks remain required.",
     ]
     (output / "report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
+    write_plots(output, position_rows, pair_rows)
+
+
+def write_plots(
+    output: Path,
+    position_rows: list[dict[str, Any]],
+    pair_rows: list[dict[str, Any]],
+) -> None:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise RuntimeError(
+            "matplotlib is required for online rollout plots; install the analysis extra"
+        ) from exc
+
+    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for row in position_rows:
+        grouped[int(row["position"])].append(row)
+    positions = np.asarray(sorted(grouped), dtype=np.int64)
+    trq_values = [np.asarray([item["trq_rel_l2"] for item in grouped[pos]]) for pos in positions]
+    noise_values = [np.asarray([item["bf16_repeat_rel_l2"] for item in grouped[pos]]) for pos in positions]
+    excess_values = [np.asarray([item["trq_excess_rel_l2"] for item in grouped[pos]]) for pos in positions]
+
+    fig, axis = plt.subplots(figsize=(10, 5))
+    for label, values, color in (
+        ("TRQ vs BF16", trq_values, "#c23b22"),
+        ("BF16 repeat", noise_values, "#386cb0"),
+        ("TRQ excess", excess_values, "#2f7d32"),
+    ):
+        median = np.asarray([np.median(value) for value in values])
+        low = np.asarray([np.quantile(value, 0.25) for value in values])
+        high = np.asarray([np.quantile(value, 0.75) for value in values])
+        axis.plot(positions, median, label=label, color=color, linewidth=1.8)
+        axis.fill_between(positions, low, high, color=color, alpha=0.16)
+    event_boundaries = sorted({
+        int(value)
+        for row in pair_rows
+        for value in str(row.get("quantization_frames", "")).split(";")
+        if value
+    })
+    for boundary in event_boundaries:
+        axis.axvline(boundary, color="#222222", linestyle="--", linewidth=1.0)
+    axis.set_xlabel("Latent-frame position")
+    axis.set_ylabel("Relative L2")
+    axis.legend()
+    axis.grid(alpha=0.2)
+    fig.tight_layout()
+    fig.savefig(output / "online_latent_absolute_curve.png", dpi=180)
+    plt.close(fig)
+
+    keys = sorted({
+        (int(row["prompt_index"]), int(row["seed"]), int(row["sample_index"]))
+        for row in position_rows
+    })
+    by_key_position = {
+        (
+            int(row["prompt_index"]),
+            int(row["seed"]),
+            int(row["sample_index"]),
+            int(row["position"]),
+        ): float(row["trq_excess_rel_l2"])
+        for row in position_rows
+    }
+    heatmap = np.asarray([
+        [by_key_position[(*key, int(position))] for position in positions]
+        for key in keys
+    ])
+    fig, axis = plt.subplots(figsize=(11, max(3, 0.35 * len(keys))))
+    image = axis.imshow(heatmap, aspect="auto", interpolation="nearest", cmap="magma")
+    axis.set_xlabel("Latent-frame position")
+    axis.set_ylabel("Prompt / seed / sample")
+    axis.set_yticks(range(len(keys)), [f"{p}/{s}/{i}" for p, s, i in keys])
+    fig.colorbar(image, ax=axis, label="TRQ excess Rel-L2")
+    fig.tight_layout()
+    fig.savefig(output / "online_prompt_time_heatmap.png", dpi=180)
+    plt.close(fig)
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:

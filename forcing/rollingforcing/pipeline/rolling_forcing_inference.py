@@ -4,6 +4,8 @@ from typing import List, Optional
 
 import torch
 
+from trq.backends.rolling_forcing import create_cache
+
 from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 
 
@@ -359,8 +361,26 @@ class CausalInferencePipeline(torch.nn.Module):
 
         for _ in range(self.num_transformer_blocks):
             kv_cache_clean.append({
-                "k": torch.zeros([batch_size, kv_cache_size, 12, 128], dtype=dtype, device=device),
-                "v": torch.zeros([batch_size, kv_cache_size, 12, 128], dtype=dtype, device=device),
+                "k": create_cache(
+                    batch_size=batch_size,
+                    frame_seq_length=1560,
+                    num_heads=12,
+                    head_dim=128,
+                    max_frames=24,
+                    dtype=dtype,
+                    device=device,
+                    quant_type=getattr(self.args, "kv_quant_type", "none"),
+                ),
+                "v": create_cache(
+                    batch_size=batch_size,
+                    frame_seq_length=1560,
+                    num_heads=12,
+                    head_dim=128,
+                    max_frames=24,
+                    dtype=dtype,
+                    device=device,
+                    quant_type=getattr(self.args, "kv_quant_type", "none"),
+                ),
                 "global_end_index": torch.tensor([0], dtype=torch.long, device=device),
                 "local_end_index": torch.tensor([0], dtype=torch.long, device=device)
             })

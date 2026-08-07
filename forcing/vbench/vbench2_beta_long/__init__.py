@@ -203,6 +203,10 @@ class VBenchLong(VBench):
             barrier()
 
         if dimension == 'background_consistency':
+            vit_path = f'{CACHE_DIR}/clip_model/ViT-B-32.pt'
+            if not os.path.isfile(vit_path):
+                wget_command = ['wget', 'https://openaipublic.azureedge.net/clip/models/40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af/ViT-B-32.pt', '-P', os.path.dirname(vit_path)]
+                subprocess.run(wget_command, check=True)
             dreamsim_path = f'{CACHE_DIR}/dreamsim_model'
             os.makedirs(dreamsim_path, exist_ok=True)
             dreamsim_ensemble_path = os.path.join(dreamsim_path, 'dino_vitb16_pretrain.pth')

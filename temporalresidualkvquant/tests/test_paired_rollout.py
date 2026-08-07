@@ -47,6 +47,39 @@ class PairedRolloutTests(TestCase):
 
             self.assertFalse(summary["passes_latent_drift_gate"])
 
+    def test_absolute_metrics_and_metadata_aligned_boundary_jump(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            directories = self._directories(root)
+            reference = torch.ones(12, 2, 2)
+            candidate = reference.clone()
+            candidate[6:].add_(0.2)
+            self._save(directories["a"], 0, reference)
+            self._save(directories["b"], 0, reference)
+            self._save(
+                directories["q"],
+                0,
+                candidate,
+                quantization_events=[{"boundary_frame": 6}],
+            )
+
+            positions, pairs, summary = analyze_paired_rollouts(
+                directories["a"],
+                directories["b"],
+                directories["q"],
+                bootstrap_resamples=20,
+                boundary_before=2,
+                boundary_after=2,
+            )
+            write_analysis(root / "analysis", positions, pairs, summary)
+
+            self.assertEqual(pairs[0]["first_quant_frame"], 6)
+            self.assertGreater(pairs[0]["boundary_jump"], 0.0)
+            self.assertIn("absolute_metrics", summary)
+            self.assertTrue((root / "analysis" / "online_boundary_jump.csv").exists())
+            self.assertTrue((root / "analysis" / "online_latent_absolute_curve.png").exists())
+            self.assertTrue((root / "analysis" / "online_prompt_time_heatmap.png").exists())
+
     def test_key_mismatch_fails_closed(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -85,6 +118,7 @@ class PairedRolloutTests(TestCase):
         latents: torch.Tensor,
         *,
         num_output_frames: int | None = None,
+        quantization_events: list[dict] | None = None,
     ) -> None:
         metadata = {
             "prompt_index": prompt_index,
@@ -93,6 +127,8 @@ class PairedRolloutTests(TestCase):
         }
         if num_output_frames is not None:
             metadata["num_output_frames"] = num_output_frames
+        if quantization_events is not None:
+            metadata["quantization_events"] = quantization_events
         torch.save({
             "metadata": metadata,
             "latents": latents,

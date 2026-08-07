@@ -11,6 +11,12 @@ outputs/
 logs/
 checkpoints/
 runs/
+runtime/
+results/
+forcing/causalforcing_official/
+forcing/longcatvideo/
+forcing/hy_worldplay/
+*.egg-info/
 temporalresidualkvquant/ckpts/
 temporalresidualkvquant/outputs/
 temporalresidualkvquant/results/

@@ -49,7 +49,7 @@ temporalresidualkvquant/
 └── tests/                    # CPU codec 与集成单元测试
 ```
 
-旁边的 `Quant-VideoGen/` 和 `/Users/moweile/Code/LAB/qvg` 都是参考实现，
+`references/quant-videogen/` 和仓库外的 `qvg` 都是参考实现，
 不是当前运行依赖。不要在其中新增第二套 TRQ codec。
 
 ## 安装与 CPU 冒烟
@@ -168,6 +168,10 @@ bash scripts/analysis/run_online_paired_rollout.sh
 bootstrap drift 判据。协议见
 [Online Paired Rollout](docs/online_paired_rollout.md)。
 
+2026-07-20 起的 absolute/boundary 指标、paired VBench 连续报告与人工 catastrophe gate、Delay/sink/
+Gradual、K/V/layer 因果干预、E4 protection gate 和 quality-gated 501/699 流程见
+[在线分叉因果实验](docs/online_causal_experiments.md)。
+
 ## 结果与评估
 
 - 新实验产物统一写入 `results/`。
@@ -185,6 +189,7 @@ bootstrap drift 判据。协议见
 - [TRQ 统一设计](docs/trq_unification.md)：稳定边界、兼容层和准入条件
 - [TRQ 诊断实验](docs/trq_diagnostic_experiments.md)：分布图和 chain drift 协议
 - [Online Paired Rollout](docs/online_paired_rollout.md)：BF16 repeat、在线 latent drift 与效率指标
+- [在线分叉因果实验](docs/online_causal_experiments.md)：E0-E5 因果干预、质量 gate 与长 rollout
 - [Identity 差异定位](docs/identity_parity_experiments.md)：同输入 codec parity 与跨库在线矩阵
 - [量化方案对比](docs/quantization_approaches.md)：naive、packed-naive、PRQ、TRQ
 - [Self-Forcing 集成](docs/self_forcing_integration.md)：缓存布局与调用路径
